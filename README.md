@@ -25,7 +25,7 @@ Add the JitPack repository and the `VaultX-API` dependency:
     <dependency>
         <groupId>com.github.Skynex</groupId>
         <artifactId>VaultX-API</artifactId>
-        <version>1.1.3</version> <!-- Replace with desired tag or release version -->
+        <version>1.1.2</version> <!-- Replace with desired tag or release version -->
         <scope>provided</scope>
     </dependency>
 </dependencies>
