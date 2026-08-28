@@ -2467,6 +2467,43 @@ public class LocalFailoverManager {
             return map;
         }, new HashMap<>(), "Failed to load Discord account links");
     }
+
+    public Map<UUID, Double> getTopBalances(String currency, int limit) {
+        String query = "SELECT uuid, balance FROM player_balances WHERE LOWER(currency) = LOWER(?) ORDER BY balance DESC LIMIT ?";
+        return executeDatabaseQuery(conn -> {
+            Map<UUID, Double> map = new java.util.LinkedHashMap<>();
+            try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                pstmt.setString(1, currency == null ? "default" : currency);
+                pstmt.setInt(2, limit > 0 ? limit : 10);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    while (rs.next()) {
+                        try {
+                            map.put(UUID.fromString(rs.getString("uuid")), rs.getDouble("balance"));
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
+            return map;
+        }, new java.util.LinkedHashMap<>(), "Failed to get top balances");
+    }
+
+    public int getPlayerRank(UUID uuid, String currency) {
+        if (uuid == null) return -1;
+        String query = "SELECT COUNT(*) + 1 AS rank FROM player_balances WHERE LOWER(currency) = LOWER(?) AND balance > (SELECT balance FROM player_balances WHERE uuid = ? AND LOWER(currency) = LOWER(?))";
+        return executeDatabaseQuery(conn -> {
+            try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                pstmt.setString(1, currency == null ? "default" : currency);
+                pstmt.setString(2, uuid.toString());
+                pstmt.setString(3, currency == null ? "default" : currency);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getInt("rank");
+                    }
+                }
+            }
+            return -1;
+        }, -1, "Failed to get player rank");
+    }
 }
 
 

@@ -116,22 +116,89 @@ public class EconomyEventListener implements Listener {
 }
 ```
 
-### 3. Using Real-Time Currency Exchange API
+    }
+}
+```
+
+### 3. Using 1-Line `VaultXHook` Helper
 
 ```java
-import net.milkbowl.vault.economy.CurrencyExchangeAPI;
-import org.bukkit.Bukkit;
-import org.bukkit.plugin.RegisteredServiceProvider;
+import net.milkbowl.vault.util.VaultXHook;
+import org.bukkit.entity.Player;
 
-public class ForexExample {
+public class QuickHookExample {
 
-    public double convertGemsToDollars(double gemsAmount) {
-        RegisteredServiceProvider<CurrencyExchangeAPI> rsp = Bukkit.getServicesManager().getRegistration(CurrencyExchangeAPI.class);
-        if (rsp != null) {
-            CurrencyExchangeAPI exchange = rsp.getProvider();
-            return exchange.convert("gems", "dollars", gemsAmount);
+    public void rewardPlayer(Player player) {
+        // Fast 1-line access to VaultX multi-currency
+        VaultXHook.getMultiCurrencyEconomy().ifPresent(econ -> {
+            econ.depositCurrencyPlayer(player, "tokens", 10.0);
+        });
+    }
+}
+```
+
+### 4. Leaderboard & Top Balances API
+
+```java
+import net.milkbowl.vault.util.VaultXHook;
+
+public class LeaderboardExample {
+
+    public void printTop10Gems() {
+        VaultXHook.getLeaderboardAPI().ifPresent(api -> {
+            api.getTopBalancesAsync("gems", 10).thenAccept(entries -> {
+                for (var entry : entries) {
+                    System.out.println("#" + entry.rank() + " " + entry.playerName() + ": " + entry.balance() + " gems");
+                }
+            });
+        });
+    }
+}
+```
+
+### 5. Atomic Batch Transactions with Automatic Rollback
+
+```java
+import net.milkbowl.vault.economy.VaultBatchTransactionAPI.BatchOperation;
+import net.milkbowl.vault.economy.VaultBatchTransactionAPI.OperationType;
+import net.milkbowl.vault.util.VaultXHook;
+import java.util.List;
+
+public class TradeSystem {
+
+    public void executePlayerTrade(Player seller, Player buyer, double amount) {
+        VaultXHook.getBatchAPI().ifPresent(api -> {
+            List<BatchOperation> ops = List.of(
+                new BatchOperation(buyer, "dollars", amount, OperationType.WITHDRAW),
+                new BatchOperation(seller, "dollars", amount, OperationType.DEPOSIT)
+            );
+            api.executeAtomicBatchAsync(ops).thenAccept(result -> {
+                if (result.success()) {
+                    seller.sendMessage("Trade completed successfully!");
+                } else {
+                    buyer.sendMessage("Trade failed: " + result.errorMessage());
+                }
+            });
+        });
+    }
+}
+```
+
+### 6. Cancelling Transactions (`VaultPreTransactionEvent`)
+
+```java
+import net.milkbowl.vault.economy.events.VaultPreTransactionEvent;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+
+public class CombatLoggerProtection implements Listener {
+
+    @EventHandler
+    public void onPreTransaction(VaultPreTransactionEvent event) {
+        if (isInCombat(event.getPlayer())) {
+            event.setCancelled(true);
+            event.setCancelReason("You cannot execute financial transactions while in combat!");
         }
-        return gemsAmount; // Fallback
     }
 }
 ```

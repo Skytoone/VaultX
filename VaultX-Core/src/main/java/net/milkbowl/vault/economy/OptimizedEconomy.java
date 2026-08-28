@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import net.milkbowl.vault.economy.events.VaultTransactionEvent;
 import net.milkbowl.vault.economy.events.VaultTransactionEvent.TransactionType;
+import net.milkbowl.vault.economy.events.VaultPreTransactionEvent;
 
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
@@ -21,7 +22,7 @@ import net.milkbowl.vault.redis.VaultRedisManager;
  * Redis cross-server synchronization, and Multi-Currency support.
  */
 @SuppressWarnings("deprecation")
-public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy {
+public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy, VaultLeaderboardAPI, VaultBatchTransactionAPI {
 
     private final Economy delegate;
     private final boolean useCache;
@@ -1324,6 +1325,67 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     @Override
     public java.util.concurrent.CompletableFuture<EconomyResponse> depositCurrencyPlayerAsync(String playerName, String currency, double amount) {
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> depositCurrencyPlayer(playerName, currency, amount), asyncExecutor);
+    }
+
+    /* --- LEADERBOARD & BATCH TRANSACTION API --- */
+
+    @Override
+    public java.util.concurrent.CompletableFuture<java.util.List<LeaderboardEntry>> getTopBalancesAsync(String currency, int limit) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            java.util.List<LeaderboardEntry> entries = new java.util.ArrayList<>();
+            if (net.milkbowl.vault.Vault.getFailoverManager() != null) {
+                Map<UUID, Double> topMap = net.milkbowl.vault.Vault.getFailoverManager().getTopBalances(currency == null ? "default" : currency, limit);
+                int rank = 1;
+                for (Map.Entry<UUID, Double> entry : topMap.entrySet()) {
+                    OfflinePlayer p = Bukkit.getOfflinePlayer(entry.getKey());
+                    entries.add(new LeaderboardEntry(entry.getKey(), p != null && p.getName() != null ? p.getName() : "Unknown", entry.getValue(), rank++));
+                }
+            }
+            return entries;
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Integer> getPlayerRankAsync(OfflinePlayer player, String currency) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (player == null || net.milkbowl.vault.Vault.getFailoverManager() == null) return -1;
+            return net.milkbowl.vault.Vault.getFailoverManager().getPlayerRank(player.getUniqueId(), currency == null ? "default" : currency);
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<BatchResult> executeAtomicBatchAsync(java.util.List<BatchOperation> operations) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (operations == null || operations.isEmpty()) {
+                return new BatchResult(true, "Empty operations list", java.util.Collections.emptyList());
+            }
+            java.util.List<EconomyResponse> responses = new java.util.ArrayList<>();
+            java.util.List<BatchOperation> executed = new java.util.ArrayList<>();
+
+            for (BatchOperation op : operations) {
+                EconomyResponse resp;
+                if (op.type() == OperationType.DEPOSIT) {
+                    resp = depositCurrencyPlayer(op.player(), op.currency(), op.amount());
+                } else {
+                    resp = withdrawCurrencyPlayer(op.player(), op.currency(), op.amount());
+                }
+                responses.add(resp);
+
+                if (!resp.transactionSuccess()) {
+                    // ROLLBACK executed operations
+                    for (BatchOperation exec : executed) {
+                        if (exec.type() == OperationType.DEPOSIT) {
+                            withdrawCurrencyPlayer(exec.player(), exec.currency(), exec.amount());
+                        } else {
+                            depositCurrencyPlayer(exec.player(), exec.currency(), exec.amount());
+                        }
+                    }
+                    return new BatchResult(false, "Operation failed: " + resp.errorMessage + ". All batch operations rolled back.", responses);
+                }
+                executed.add(op);
+            }
+            return new BatchResult(true, null, responses);
+        }, asyncExecutor);
     }
 
     private long getEffectiveTtl() {

@@ -124,6 +124,14 @@ public class Vault extends JavaPlugin {
         return wrappedEconomies;
     }
 
+    public static net.milkbowl.vault.economy.VaultLeaderboardAPI getLeaderboardAPI() {
+        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+    }
+
+    public static net.milkbowl.vault.economy.VaultBatchTransactionAPI getBatchTransactionAPI() {
+        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+    }
+
     @Override
     public void onDisable() {
         // Shutdown registered OptimizedEconomy thread pools and clear caches
@@ -301,6 +309,11 @@ public class Vault extends JavaPlugin {
         exchangeRateManager = new net.milkbowl.vault.economy.ExchangeRateManager(this);
         if (sm != null && exchangeRateManager != null) {
             sm.register(net.milkbowl.vault.economy.CurrencyExchangeAPI.class, exchangeRateManager, this, ServicePriority.Normal);
+        }
+        if (sm != null && wrappedEconomies != null && !wrappedEconomies.isEmpty()) {
+            OptimizedEconomy primaryEcon = wrappedEconomies.get(0);
+            sm.register(net.milkbowl.vault.economy.VaultLeaderboardAPI.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultBatchTransactionAPI.class, primaryEcon, this, ServicePriority.Normal);
         }
         centralBankManager = new net.milkbowl.vault.economy.CentralBankManager(this, exchangeRateManager);
         mailboxManager = new net.milkbowl.vault.economy.MailboxManager(this);
