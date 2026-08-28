@@ -1,7 +1,7 @@
 name: Vault
 version: ${project.version}
 description: ${project.description}
-authors: [Skytoone]
+authors: [SkyNex]
 
 main: ${mainClass}
 load: STARTUP

@@ -26,7 +26,7 @@ public class VaultXExpansion extends PlaceholderExpansion {
 
     @Override
     public @NotNull String getAuthor() {
-        return "Skytoone";
+        return "SkyNex";
     }
 
     @Override
