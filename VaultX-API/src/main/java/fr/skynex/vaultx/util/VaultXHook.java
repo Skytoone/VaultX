@@ -18,6 +18,11 @@ import net.milkbowl.vault.economy.VaultEscrowAPI;
 import net.milkbowl.vault.economy.VaultFirewallAPI;
 import net.milkbowl.vault.economy.VaultBlackMarketAPI;
 import net.milkbowl.vault.economy.VaultStockAPI;
+import net.milkbowl.vault.economy.VaultCheckAPI;
+import net.milkbowl.vault.economy.VaultLoanAPI;
+import net.milkbowl.vault.economy.VaultInflationAPI;
+import net.milkbowl.vault.economy.VaultMilestoneAPI;
+import net.milkbowl.vault.economy.VaultCryptoAPI;
 
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.RegisteredServiceProvider;
@@ -169,6 +174,46 @@ public final class VaultXHook {
      */
     public static Optional<VaultStockAPI> getStockAPI() {
         RegisteredServiceProvider<VaultStockAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultStockAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultCheckAPI service provider if available.
+     */
+    public static Optional<VaultCheckAPI> getCheckAPI() {
+        RegisteredServiceProvider<VaultCheckAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultCheckAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultLoanAPI service provider if available.
+     */
+    public static Optional<VaultLoanAPI> getLoanAPI() {
+        RegisteredServiceProvider<VaultLoanAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultLoanAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultInflationAPI service provider if available.
+     */
+    public static Optional<VaultInflationAPI> getInflationAPI() {
+        RegisteredServiceProvider<VaultInflationAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultInflationAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultMilestoneAPI service provider if available.
+     */
+    public static Optional<VaultMilestoneAPI> getMilestoneAPI() {
+        RegisteredServiceProvider<VaultMilestoneAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultMilestoneAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultCryptoAPI service provider if available.
+     */
+    public static Optional<VaultCryptoAPI> getCryptoAPI() {
+        RegisteredServiceProvider<VaultCryptoAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultCryptoAPI.class);
         return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
     }
 }

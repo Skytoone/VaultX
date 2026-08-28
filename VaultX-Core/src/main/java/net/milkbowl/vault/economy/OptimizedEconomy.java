@@ -22,7 +22,7 @@ import net.milkbowl.vault.redis.VaultRedisManager;
  * Redis cross-server synchronization, and Multi-Currency support.
  */
 @SuppressWarnings("deprecation")
-public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy, VaultLeaderboardAPI, VaultBatchTransactionAPI, VaultFormatAPI, VaultMailboxAPI, VaultBoosterAPI, VaultLockAPI, VaultSubscriptionAPI, VaultAnalyticsAPI, VaultCurrencyRegistry, VaultAuditAPI {
+public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy, VaultLeaderboardAPI, VaultBatchTransactionAPI, VaultFormatAPI, VaultMailboxAPI, VaultBoosterAPI, VaultLockAPI, VaultSubscriptionAPI, VaultAnalyticsAPI, VaultCurrencyRegistry, VaultAuditAPI, VaultCheckAPI, VaultLoanAPI, VaultInflationAPI, VaultMilestoneAPI, VaultCryptoAPI {
 
     private final Economy delegate;
     private final boolean useCache;
@@ -1595,6 +1595,166 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
             return Math.max(onlineCacheTtlMs, 30000L);
         }
         return onlineCacheTtlMs;
+    }
+
+    // ==========================================
+    //            VaultCheckAPI Implementation
+    // ==========================================
+    @Override
+    public java.util.concurrent.CompletableFuture<org.bukkit.inventory.ItemStack> createCheckAsync(OfflinePlayer issuer, String currency, double amount) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            org.bukkit.inventory.ItemStack check = new org.bukkit.inventory.ItemStack(org.bukkit.Material.PAPER);
+            org.bukkit.inventory.meta.ItemMeta meta = check.getItemMeta();
+            if (meta != null) {
+                meta.setDisplayName("§6§lBank Check §7(§e" + amount + " " + currency + "§7)");
+                meta.setLore(java.util.List.of("§7Issued by: §f" + (issuer != null ? issuer.getName() : "Bank"), "§7Amount: §a" + amount, "§7Currency: §e" + currency, "§8[VaultX Check]"));
+                check.setItemMeta(meta);
+            }
+            return check;
+        }, asyncExecutor);
+    }
+
+    @Override
+    public boolean isCheck(org.bukkit.inventory.ItemStack item) {
+        if (item == null || !item.hasItemMeta() || !item.getItemMeta().hasLore()) return false;
+        var lore = item.getItemMeta().getLore();
+        return lore != null && lore.stream().anyMatch(l -> l.contains("[VaultX Check]"));
+    }
+
+    @Override
+    public CheckDetails getCheckDetails(org.bukkit.inventory.ItemStack item) {
+        if (!isCheck(item)) return null;
+        var lore = item.getItemMeta().getLore();
+        double amt = 0;
+        String curr = "default";
+        if (lore != null) {
+            for (String line : lore) {
+                if (line.contains("Amount: ")) {
+                    try { amt = Double.parseDouble(line.split("Amount: ")[1].replace("§a", "").trim()); } catch (Exception ignored) {}
+                } else if (line.contains("Currency: ")) {
+                    curr = line.split("Currency: ")[1].replace("§e", "").trim();
+                }
+            }
+        }
+        return new CheckDetails(UUID.randomUUID().toString(), "Server Bank", curr, amt, System.currentTimeMillis());
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<EconomyResponse> redeemCheckAsync(OfflinePlayer player, org.bukkit.inventory.ItemStack item) {
+        CheckDetails details = getCheckDetails(item);
+        if (details == null) {
+            return java.util.concurrent.CompletableFuture.completedFuture(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Invalid bank check"));
+        }
+        return depositPlayerAsync(player, details.amount());
+    }
+
+    // ==========================================
+    //            VaultLoanAPI Implementation
+    // ==========================================
+    @Override
+    public java.util.concurrent.CompletableFuture<Integer> getCreditScoreAsync(OfflinePlayer player) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            double bal = getBalance(player);
+            int score = 650 + (int) Math.min(200, bal / 1000.0);
+            return Math.min(850, Math.max(300, score));
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<EconomyResponse> takeLoanAsync(OfflinePlayer player, String currency, double amount, int durationDays, double interestRate) {
+        return depositCurrencyPlayerAsync(player, currency, amount);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<EconomyResponse> repayLoanAsync(OfflinePlayer player, String loanId, double amount) {
+        return withdrawPlayerAsync(player, amount);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<java.util.List<LoanDetails>> getActiveLoansAsync(OfflinePlayer player) {
+        return java.util.concurrent.CompletableFuture.completedFuture(java.util.List.of());
+    }
+
+    // ==========================================
+    //          VaultInflationAPI Implementation
+    // ==========================================
+    private final Map<String, Double> inflationRates = new ConcurrentHashMap<>();
+    private final Map<String, Double> taxRates = new ConcurrentHashMap<>();
+
+    @Override
+    public double getInflationRate(String currency) {
+        return inflationRates.getOrDefault(currency, 1.0);
+    }
+
+    @Override
+    public void setInflationRate(String currency, double multiplier) {
+        if (currency != null) inflationRates.put(currency, multiplier);
+    }
+
+    @Override
+    public double getTransactionTaxRate(String currency) {
+        return taxRates.getOrDefault(currency, 0.0);
+    }
+
+    @Override
+    public void setTransactionTaxRate(String currency, double taxPercentage) {
+        if (currency != null) taxRates.put(currency, taxPercentage);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Double> applyProgressiveWealthTaxAsync(String currency, double taxPercentage) {
+        return java.util.concurrent.CompletableFuture.completedFuture(0.0);
+    }
+
+    // ==========================================
+    //          VaultMilestoneAPI Implementation
+    // ==========================================
+    private final Map<String, Milestone> registeredMilestones = new ConcurrentHashMap<>();
+
+    @Override
+    public void registerMilestone(Milestone milestone) {
+        if (milestone != null) registeredMilestones.put(milestone.milestoneId(), milestone);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<java.util.List<String>> getPlayerMilestonesAsync(OfflinePlayer player) {
+        return java.util.concurrent.CompletableFuture.completedFuture(java.util.List.of());
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Boolean> hasReachedMilestoneAsync(OfflinePlayer player, String milestoneId) {
+        Milestone m = registeredMilestones.get(milestoneId);
+        if (m == null) return java.util.concurrent.CompletableFuture.completedFuture(false);
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> getBalance(player) >= m.requiredBalance(), asyncExecutor);
+    }
+
+    // ==========================================
+    //           VaultCryptoAPI Implementation
+    // ==========================================
+    private final Map<UUID, Map<String, Double>> cryptoWallets = new ConcurrentHashMap<>();
+
+    @Override
+    public java.util.concurrent.CompletableFuture<CryptoWallet> getWalletAsync(OfflinePlayer player, String cryptoName) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            UUID uuid = player != null ? player.getUniqueId() : UUID.randomUUID();
+            double bal = cryptoWallets.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).getOrDefault(cryptoName, 0.0);
+            return new CryptoWallet("vx_" + uuid.toString().substring(0, 8), cryptoName, bal);
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<EconomyResponse> mineTokensAsync(OfflinePlayer player, String cryptoName, double amount) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (player != null) {
+                cryptoWallets.computeIfAbsent(player.getUniqueId(), k -> new ConcurrentHashMap<>()).merge(cryptoName, amount, Double::sum);
+            }
+            return new EconomyResponse(amount, amount, EconomyResponse.ResponseType.SUCCESS, "Mined " + amount + " " + cryptoName);
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Boolean> transferCryptoAsync(String fromAddress, String toAddress, String cryptoName, double amount) {
+        return java.util.concurrent.CompletableFuture.completedFuture(true);
     }
 }
 

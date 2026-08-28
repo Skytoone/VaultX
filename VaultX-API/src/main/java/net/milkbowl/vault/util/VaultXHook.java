@@ -29,4 +29,9 @@ public final class VaultXHook {
     public static Optional<VaultFirewallAPI> getFirewallAPI() { return fr.skynex.vaultx.util.VaultXHook.getFirewallAPI(); }
     public static Optional<VaultBlackMarketAPI> getBlackMarketAPI() { return fr.skynex.vaultx.util.VaultXHook.getBlackMarketAPI(); }
     public static Optional<VaultStockAPI> getStockAPI() { return fr.skynex.vaultx.util.VaultXHook.getStockAPI(); }
+    public static Optional<VaultCheckAPI> getCheckAPI() { return fr.skynex.vaultx.util.VaultXHook.getCheckAPI(); }
+    public static Optional<VaultLoanAPI> getLoanAPI() { return fr.skynex.vaultx.util.VaultXHook.getLoanAPI(); }
+    public static Optional<VaultInflationAPI> getInflationAPI() { return fr.skynex.vaultx.util.VaultXHook.getInflationAPI(); }
+    public static Optional<VaultMilestoneAPI> getMilestoneAPI() { return fr.skynex.vaultx.util.VaultXHook.getMilestoneAPI(); }
+    public static Optional<VaultCryptoAPI> getCryptoAPI() { return fr.skynex.vaultx.util.VaultXHook.getCryptoAPI(); }
 }

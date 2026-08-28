@@ -376,6 +376,11 @@ public class Vault extends JavaPlugin {
             sm.register(net.milkbowl.vault.economy.VaultAnalyticsAPI.class, primaryEcon, this, ServicePriority.Normal);
             sm.register(net.milkbowl.vault.economy.VaultCurrencyRegistry.class, primaryEcon, this, ServicePriority.Normal);
             sm.register(net.milkbowl.vault.economy.VaultAuditAPI.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultCheckAPI.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultLoanAPI.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultInflationAPI.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultMilestoneAPI.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultCryptoAPI.class, primaryEcon, this, ServicePriority.Normal);
         }
 
         // Register PlaceholderAPI expansion if present
