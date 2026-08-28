@@ -1,0 +1,190 @@
+[CENTER]
+[ATTACH type="full" alt="VaultX Banner"]1[/ATTACH]
+
+[SIZE=7][B][COLOR=#FFD700]VAULT[/COLOR][COLOR=#E8E8E8]X[/COLOR][/B][/SIZE]
+
+[SIZE=3][COLOR=#666666]◈ ─────────────────────────────────────────────── ◈[/COLOR][/SIZE]
+
+[SIZE=4][B][COLOR=#C0C0C0]The Enterprise-Grade Performance Engine for Minecraft Economy & Permissions[/COLOR][/B][/SIZE]
+
+[SIZE=3][COLOR=#666666]◈ ─────────────────────────────────────────────── ◈[/COLOR][/SIZE]
+
+[SIZE=3] [/SIZE]
+
+[SIZE=4][COLOR=#DDDDDD]VaultX is a high-performance, zero-compromise reimagining of the legendary [B]Vault[/B] plugin.
+Built natively for [B][COLOR=#FFD700]Java 21[/COLOR][/B] and modern [B][COLOR=#FFD700]Paper[/COLOR][/B] servers, it delivers extreme efficiency,
+a lightning-fast [B]O(1) caching layer[/B], and a modern event-driven API —
+while retaining [B][COLOR=#5EFF8A]100% drop-in compatibility[/COLOR][/B] with every plugin you already run.[/COLOR][/SIZE]
+
+[SIZE=3] [/SIZE]
+
+[SIZE=3][COLOR=#777777]⬛  Java 21+ Required  ⬛  Paper / Folia Supported  ⬛  Drop-in Vault Replacement  ⬛[/COLOR][/SIZE]
+
+[/CENTER]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]✦  CORE FEATURES[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[SIZE=3] [/SIZE]
+
+[LIST]
+[*][B][COLOR=#FFD700]⚡  O(1) Lightning Cache[/COLOR][/B]
+[COLOR=#AAAAAA]Intercepts all [/COLOR][COLOR=#E0E0E0]getBalance()[/COLOR][COLOR=#AAAAAA] calls and serves them instantly from RAM. Eliminates database query overhead and completely eradicates lag caused by scoreboards, tablists, and live HUDs querying balances every tick.[/COLOR]
+
+[*][B][COLOR=#FFD700]🔀  Universal Interceptor Engine[/COLOR][/B]
+[COLOR=#AAAAAA]Dynamically hooks into [B]any[/B] economy provider registered at runtime. VaultX enforces elite-grade memory caching without modifying or patching third-party plugin code.[/COLOR]
+
+[*][B][COLOR=#FFD700]🧵  Asynchronous Architecture[/COLOR][/B]
+[COLOR=#AAAAAA]All resource-intensive operations (account conversions, bulk queries, event dispatching) are offloaded to dedicated worker threads. Your [B]Main Tick thread stays clean[/B], always.[/COLOR]
+
+[*][B][COLOR=#FFD700]📡  Advanced Audit Event API[/COLOR][/B]
+[COLOR=#AAAAAA]Dispatches specialised [/COLOR][COLOR=#E0E0E0]VaultTransactionEvent[/COLOR][COLOR=#AAAAAA] events asynchronously on every economy call — enabling real-time audit logs, anti-duplication hooks, and developer integrations with zero effort.[/COLOR]
+
+[*][B][COLOR=#FFD700]🔭  StackWalker Reflection Bypass[/COLOR][/B]
+[COLOR=#AAAAAA]Uses modern JVM bytecode stack walking (Java 21 [/COLOR][COLOR=#E0E0E0]StackWalker[/COLOR][COLOR=#AAAAAA] API) to pinpoint exactly which upstream plugin triggered a balance change — with [B]zero performance penalty[/B].[/COLOR]
+
+[*][B][COLOR=#FFD700]🗑️  Zero Debt Purge[/COLOR][/B]
+[COLOR=#AAAAAA]Stripped of 30+ obsolete legacy bridges dating back to 2012. Only lean, high-speed, modern code remains — directly lowering your server's memory footprint and GC pressure.[/COLOR]
+
+[*][B][COLOR=#FFD700]🔁  Self-Healing Cleanup Listeners[/COLOR][/B]
+[COLOR=#AAAAAA]Automated lifecycle listeners flush all RAM buffers the moment a player disconnects, preventing heap bloat and ensuring your server stays stable over long uptimes.[/COLOR]
+
+[*][B][COLOR=#FFD700]🛡️  Legacy Shield (Drop-in Replacement)[/COLOR][/B]
+[COLOR=#AAAAAA]VaultX fully registers itself as [/COLOR][COLOR=#E0E0E0]'Vault'[/COLOR][COLOR=#AAAAAA] in the plugin registry. Every existing plugin that depends on Vault links to VaultX [B]automatically — no reconfiguration, no edits, no restarts.[/B][/COLOR]
+[/LIST]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]💎  WHY CHOOSE VAULTX?[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[SIZE=3] [/SIZE]
+
+[TABLE]
+[TR]
+[TD][CENTER][SIZE=4]⚡[/SIZE]
+[B][COLOR=#FFD700]Sub-Millisecond Queries[/COLOR][/B][/CENTER][/TD]
+[TD][CENTER][SIZE=4]🏗️[/SIZE]
+[B][COLOR=#FFD700]Engineered for Scale[/COLOR][/B][/CENTER][/TD]
+[TD][CENTER][SIZE=4]🔒[/SIZE]
+[B][COLOR=#FFD700]Enterprise Stability[/COLOR][/B][/CENTER][/TD]
+[/TR]
+[TR]
+[TD][COLOR=#AAAAAA]Economy calls that once hit slow plugin stacks or blocking database lookups are now served in [B]under 0.01ms[/B] from VaultX's in-memory engine.[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Designed for [B]100+ concurrent players[/B] where scoreboards, chat formatters, shops and GUIs call balance methods dozens of times per second.[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Built on [B]Java 21 concurrency primitives[/B] with lock-free data structures — guaranteeing thread safety and zero race conditions under maximum load.[/COLOR][/TD]
+[/TR]
+[/TABLE]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]🔌  PLUG & PLAY COMPATIBILITY[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#AAAAAA]VaultX registers as a global drop-in fallback for Vault. It works out-of-the-box with all major plugins — no configuration required:[/COLOR]
+
+[SIZE=3] [/SIZE]
+
+[CENTER]
+[SIZE=4][B][COLOR=#E0E0E0]●  EssentialsX  ●  LuckPerms  ●  CMI  ●  PlaceholderAPI[/COLOR][/B][/SIZE]
+[SIZE=4][B][COLOR=#E0E0E0]●  Skript  ●  ShopGUI+  ●  MyBlock  ●  PunishmentX[/COLOR][/B][/SIZE]
+[/CENTER]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]🛠️  COMMANDS[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[SIZE=3] [/SIZE]
+
+[TABLE]
+[TR]
+[TD][B][COLOR=#888888]Command[/COLOR][/B][/TD]
+[TD][B][COLOR=#888888]Permission[/COLOR][/B][/TD]
+[TD][B][COLOR=#888888]Description[/COLOR][/B][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/vault-info[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]vaultx.admin[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Display active economy bridges, registered providers, and real-time interception status.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/vault-convert [econ1] [econ2][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]vaultx.admin[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Asynchronously migrate all player balances from one economy provider to another. Safe & non-blocking.[/COLOR][/TD]
+[/TR]
+[/TABLE]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]📐  ARCHITECTURE OVERVIEW[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#AAAAAA]VaultX handles the heavy lifting entirely behind the scenes. Every core system is designed for [B]zero administration[/B] and maximum transparency:[/COLOR]
+
+[SIZE=3] [/SIZE]
+
+[CODE=yaml]
+# ╔══════════════════════════════════════════════════════════════╗
+# ║                    VaultX — Systems Overview                 ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+[Core Interception Layer]
+  Wraps any dynamically-registered Economy.class with:
+    ✔ ConcurrentHashMap UUID-keyed balance store (O(1) reads)
+    ✔ GC-aware player-quit flushing (no heap bloat)
+    ✔ Asynchronous event broadcasting on every mutation
+
+[Security & Audit Engine]
+  Guards every transaction with async VaultTransactionEvent:
+    ✔ Operation type  : WITHDRAW / DEPOSIT / SET
+    ✔ Caller tracing  : Automated namespace identification (e.g. 'com.example.shop')
+    ✔ Delta tracking  : Before/after balance snapshots per event
+
+[Legacy Compatibility Layer]
+  ✔ Native SuperPermissions fallback — always loaded first
+  ✔ Full 'Vault' service registration — transparent to all consumers
+  ✔ Registers permission & economy bridges for maximum coverage
+[/CODE]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]📦  INSTALLATION[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[SIZE=3] [/SIZE]
+
+[LIST=1]
+[*][COLOR=#AAAAAA][B]Remove[/B] your existing [/COLOR][COLOR=#E0E0E0]Vault.jar[/COLOR][COLOR=#AAAAAA] from your [/COLOR][COLOR=#E0E0E0]/plugins[/COLOR][COLOR=#AAAAAA] folder.[/COLOR]
+[*][COLOR=#AAAAAA][B]Download[/B] the latest [/COLOR][COLOR=#FFD700]VaultX.jar[/COLOR][COLOR=#AAAAAA] and drop it into [/COLOR][COLOR=#E0E0E0]/plugins[/COLOR][COLOR=#AAAAAA].[/COLOR]
+[*][COLOR=#AAAAAA][B]Restart[/B] your server — VaultX self-registers and intercepts your economy provider automatically.[/COLOR]
+[*][COLOR=#AAAAAA]Optionally run [/COLOR][COLOR=#FFD700]/vault-info[/COLOR][COLOR=#AAAAAA] to confirm all bridges are active.[/COLOR]
+[/LIST]
+
+[CENTER][SIZE=4][B][COLOR=#5EFF8A]No configuration files. No setup. It just works.[/COLOR][/B][/SIZE][/CENTER]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[SIZE=3] [/SIZE]
+
+[CENTER]
+[SIZE=3][COLOR=#AAAAAA]Questions? Bug reports? Feature requests? Come say hi on Discord.[/COLOR][/SIZE]
+[SIZE=3] [/SIZE]
+[URL='https://discord.gg/ycxRfd44fm'][IMG]https://image.noelshack.com/fichiers/2026/19/2/1778002404-universal-banner-edited-final-177800224786112.png[/IMG][/URL]
+[SIZE=3] [/SIZE]
+[SIZE=2][COLOR=#555555]VaultX is not affiliated with the original Vault project. All plugin names mentioned are trademarks of their respective owners.[/COLOR][/SIZE]
+[/CENTER]

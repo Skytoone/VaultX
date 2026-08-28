@@ -1,0 +1,520 @@
+# =======================================================
+# Vault Modern X - Configuration
+# =======================================================
+
+economy:
+  # Enable high-performance in-memory cache (O(1))
+  # Recommended: true
+  use-cache: true
+  
+  # Cache time-to-live for online players (in milliseconds)
+  # Prevents stale values if other plugins modify the balance directly.
+  # Recommended: 1000
+  cache-ttl-ms: 1000
+  
+  # Display logs of each transaction (useful for debugging)
+  debug-transactions: false
+
+# =======================================================
+# Dynamic Pricing API & Inflation Engine
+# =======================================================
+dynamic-pricing:
+  # Enable automatic money supply inflation tracking and dynamic price scaling
+  enabled: true
+
+  # Recalculation interval (in minutes)
+  update-interval-minutes: 15
+
+  # Formula elasticity scaling factor (1.0 = 1:1 direct ratio, 0.5 = dampened)
+  elasticity: 1.0
+
+  # Minimum and maximum price multiplier bounds
+  min-multiplier: 0.5
+  max-multiplier: 5.0
+
+  # If true, server shop sell prices (selling to server) will decrease when inflation rises
+  invert-sell-prices: false
+
+  # Baseline money supply for each currency (used as reference 1.0x baseline)
+  # If baseline amount is set to 0, VaultX auto-detects current supply at startup
+  baseline-supplies:
+    default: 1000000.0
+
+redis:
+  # Enable inter-server synchronization
+  enabled: true
+  host: "127.0.0.1"
+  port: 6379
+  password: ""
+  server-id: "server-1"
+  
+  # Redis channel used. Change this if you have multiple
+  # distinct networks on the same Redis database.
+  channel: "vaultx:economy:sync"
+
+  # Maximum number of simultaneous connections in the Redis Jedis pool
+  max-connections: 16
+
+  # Maximum waiting time for a Redis connection (in milliseconds)
+  connection-timeout-ms: 2000
+
+  # Redis connection check interval (in seconds)
+  heartbeat-interval-seconds: 5
+
+metrics:
+  # Enable bStats statistics
+  enabled: true
+
+security:
+  # Anti-duplication shield (Rate-Limiter)
+  rate-limiter:
+    enabled: true
+    # Max number of transactions (withdraw/deposit) allowed per second
+    max-transactions-per-second: 20
+    # Cooldown time (in seconds) if the player exceeds the limit
+    cooldown-seconds: 5
+  # Transaction Firewall & Fraud Detection
+  firewall:
+    enabled: true
+    # Maximum authorized amount in a single transaction
+    max-single-transaction: 10000000.0
+    # Automatic freezing of suspicious players (Freeze)
+    auto-freeze: true
+    # Heuristic Spike Detection
+    spike-detection:
+      enabled: true
+      # Suspicious multiplier factor (e.g., +500% -> 5.0)
+      factor: 5.0
+      # Analysis window in seconds (e.g., 60s)
+      time-window-seconds: 60
+      # Total transaction threshold to avoid low-level alerts
+      minimum-threshold: 10000.0
+    # Threshold above which a successful transaction triggers a Discord alert (e.g., 500000.0)
+    large-transaction-threshold: 500000.0
+    # Discord notification for security alerts
+    discord-webhook:
+      enabled: false
+      url: "YOUR_DISCORD_WEBHOOK_URL_HERE"
+    # Inflation Spike Alert Configuration
+    inflation-alert:
+      enabled: true
+      threshold-percent: 5.0
+
+storage:
+  # Local or shared storage type for failover and audit.
+  # Possible values: sqlite, mysql, mariadb
+  type: "sqlite"
+
+  # Prune player transactions and security audits older than this number of days (runs hourly).
+  # Set to -1 or 0 to disable automated pruning.
+  transaction-history-retention-days: 30
+
+  # Configuration for mysql and mariadb (ignored if sqlite is selected)
+  mysql:
+    host: "127.0.0.1"
+    port: 3306
+    database: "vaultx"
+    username: "root"
+    password: ""
+    # Additional parameters for the JDBC connection string (e.g., SSL, timezone)
+    properties: "?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
+
+banks:
+  # Replace the existing bank system with a native
+  # high-performance system synchronized via Redis.
+  native-redis:
+    enabled: true
+  # Automatic backup of banks on the local disk (SQLite/YAML)
+  # Useful in case of Redis crash or restart.
+  backup:
+    enabled: true
+    interval-minutes: 30
+  # Creation cost in default currency charged when opening a new shared bank account
+  creation-cost: 5000.0
+  # Maximum number of members allowed in a single bank account
+  max-members: 20
+  # Maximum number of shared bank accounts a single player can own
+  max-accounts-per-player: 3
+
+# Physical Economic Checks (/vx check write <amount>)
+checks:
+  # Enable written physical check signing and claiming
+  enabled: true
+  # Minimum amount required to issue a check
+  min-amount: 1.0
+  # Maximum amount allowed per check (Set to 0 for unlimited)
+  max-amount: 10000000.0
+  # Creation fee in default currency charged when writing a check
+  creation-fee: 10.0
+  # Expiration period in days (-1 for perpetual checks)
+  expiration-days: 30
+
+# ATM Signs & Cash Machines
+atms:
+  # Enable interaction with [ATM] signs
+  enabled: true
+  # Sign title header tag
+  sign-header: "[ATM]"
+  # Transaction fee in default currency per ATM withdrawal or deposit
+  transaction-fee: 2.0
+
+# Escrow & Secure Player Trading (/vx escrow)
+escrow:
+  # Enable the third-party escrow trading system
+  enabled: true
+  # Default timeout before sender can claim a refund (in seconds)
+  default-timeout-seconds: 300
+  # Escrow service fee collected for the Public Treasury (in percent)
+  service-fee-percent: 0.5
+  # Maximum active escrow transactions allowed per player
+  max-active-per-player: 5
+
+# Economic Mailbox (/vx mailbox)
+mailbox:
+  # Enable offline transactions mailbox
+  enabled: true
+  # Maximum pending mailbox transactions per player
+  max-messages-per-player: 50
+  # Retention period in days for unclaimed offline payments
+  retention-days: 60
+
+# Rich List & Leaderboard Filter Settings (/vx top)
+baltop:
+  # Automatically hide vanished players from the wealth leaderboard
+  hide-vanished-players: true
+  # System accounts excluded from wealth rankings
+  excluded-accounts:
+    - "public_treasury"
+    - "server_bank"
+
+# Currency Formatting & Display Settings
+formatting:
+  # Default currency symbol
+  symbol: "$"
+  # Symbol position: 'BEFORE' (e.g. $100) or 'AFTER' (e.g. 100$)
+  symbol-position: "AFTER"
+  # Number of decimal places displayed
+  decimal-places: 2
+  # Decimal separator character
+  decimal-separator: "."
+  # Thousands separator character
+  thousands-separator: ","
+  # Enable short compact numbers in leaderboards and messages (e.g. 1.2M, 500k)
+  use-short-format: false
+
+# Audio & Visual Actionbar Notifications
+visuals:
+  # Send color actionbar notifications on balance deposit/withdraw
+  actionbar:
+    enabled: true
+  # Play sound effects on transaction events and GUI interactions
+  sounds:
+    enabled: true
+    volume: 0.8
+
+advanced:
+  # Ultra-fast UUID <-> Username cache synchronized by Redis
+  # Prevents server lag (TPS drops) due to Bukkit.getOfflinePlayer() calls
+  global-uuid-cache: true
+  # Maximum number of entries kept in the in-memory UUID cache (LRU eviction)
+  uuid-cache-max-size: 10000
+  # Maximum asynchronous database batch queue limit to prevent OOM
+  batch-queue-limit: 50000
+  # Asynchronously preload all known server players at startup
+  preload-offline-players: true
+  # Settings for the global wealth leaderboard (Rich List)
+  global-rich-list:
+    # Update interval of the leaderboard in minutes (local cache updated from Redis ZSET)
+    update-interval-minutes: 5
+    # Maximum number of players tracked in the leaderboard (e.g., top 100)
+    max-tracked-players: 100
+
+currency-exchange:
+  # Automatically convert money if the player doesn't have enough of a specific currency,
+  # but has the necessary funds via the exchange rate.
+  auto-convert: true
+  # Exchange rate: Value of one unit of this currency in 'default' currency.
+  # Example: 1 'Gems' is worth 1000 default currencies.
+  rates:
+    Gems: 1000.0
+    Tokens: 10.0
+  # Custom symbols used in chat and formatting for each currency.
+  # If not defined, it will fallback to the currency name.
+  symbols:
+    Gems: "&a✦"
+    Tokens: "&b✪"
+  # Dynamic Exchange Rate Configuration (Forex)
+  dynamic-rates:
+    enabled: true
+    # Fluctuation interval in minutes
+    update-interval-minutes: 15
+    # Maximum fluctuation per interval (in percent, e.g., 3.5%)
+    max-fluctuation-percent: 3.5
+    # Demand factor (rate adjustment during large traded volumes)
+    demand-factor: 0.001
+    # Random market events (Crash, Boom, etc.)
+    market-events:
+      enabled: true
+      chance-percent: 10.0
+
+# Central Bank Configuration (Taxes, Imposts & Interest)
+central-bank:
+  interest:
+    enabled: true
+    # Application interval in minutes (e.g., 60 minutes = 1 hour)
+    interval-minutes: 60
+    # Periodic interest rate for each currency in percent
+    rates:
+      default: 0.05      # +0.05% per hour
+      gems: 0.1          # +0.10% per hour
+      tokens: 0.02       # +0.02% per hour
+    # Interest bonus for bank accounts
+    bank-bonus-percent: 0.01
+  taxes:
+    enabled: true
+    # Tax on transfers between players (/vx pay) in percent
+    pay-tax-percent: 2.0
+    # Tax on currency conversions in percent
+    exchange-tax-percent: 1.0
+    # Bank account receiving the taxes (Public Treasury)
+    treasury-account: "public_treasury"
+  wealth-tax:
+    enabled: true
+    # Threshold at which wealth is taxed (e.g., 1,000,000.0)
+    threshold: 1000000.0
+    # Wealth tax rate per interval (in percent, e.g., 0.05% of excess)
+    tax-percent: 0.05
+
+# Shared Bank Loans & Credit Configuration
+loans:
+  # Base interest rate applied to bank loans (in percent, e.g. 5.0 = 5% interest)
+  interest-rate-percent: 5.0
+  # How often loan installments are billed/collected (in minutes, e.g. 60 minutes = 1 hour)
+  billing-interval-minutes: 60
+  # Maximum total amount a player can borrow across active loans
+  max-borrow-amount: 500000.0
+  # Maximum number of active loans per player
+  max-loans-per-player: 3
+  # Overdue penalty rate applied if installment payment fails (in percent)
+  overdue-penalty-percent: 2.5
+
+# Periodical Salaries / Allowances Configuration (Paydays)
+paydays:
+  # Enable periodical salaries
+  enabled: true
+  # Payout interval in minutes (e.g., 60 minutes = 1 hour)
+  interval-minutes: 60
+  # Salary configuration per LuckPerms/Vault group
+  groups:
+    default: 50.0
+    vip: 500.0
+    mvp: 1000.0
+  # Salary tax
+  tax:
+    # Automatically collect a tax on salaries for the Public Treasury
+    enabled: true
+    # Tax percentage (e.g., 10.0%)
+    percent: 10.0
+
+# Stock Exchange / Commodities Market Configuration
+stocks:
+  # Enable the commodity stock market (Gold, Iron, Emerald, Diamond) and its periodic news events
+  enabled: true
+  # Fluctuation interval in minutes
+  fluctuation-interval-minutes: 5
+  # Maximum fluctuation percentage per interval (e.g., 3.0 = +/-3.0% random walk)
+  max-fluctuation-percent: 3.0
+  # Chance of a market news event (crisis/boom/shortage) per interval (in percent, e.g., 15.0%)
+  event-chance-percent: 15.0
+  # Dividend configurations for bank shareholders
+  dividends:
+    # Dividend payout interval in minutes
+    payout-interval-minutes: 60
+    # Percentage of bank balance distributed as dividends per interval (e.g., 1.0%)
+    pool-percent: 1.0
+
+# Recurring Payments & Subscriptions Configuration (Loyers Automatiques)
+subscriptions:
+  # Enable the recurring payment & subscription system
+  enabled: true
+  # Limit of active subscriptions a player can have (Set to -1 or 0 for unlimited)
+  max-active-per-player: 10
+  # How often the scheduler checks for due subscriptions (in minutes)
+  check-interval-minutes: 1
+
+# Dynamic Commands & Aliases Configuration (Commandes Personnalisables)
+# Permet de renommer les commandes, de modifier les alias et les permissions requises.
+commands:
+  vaultx:
+    enabled: true
+    name: "vaultx"
+    permission: "vault.use"
+    aliases:
+      - "vx"
+  money:
+    enabled: true
+    name: "money"
+    permission: "vault.command.money"
+    aliases:
+      - "balance"
+      - "bal"
+  pay:
+    enabled: true
+    name: "pay"
+    permission: "vault.command.pay"
+    aliases: []
+  baltop:
+    enabled: true
+    name: "baltop"
+    permission: "vault.top"
+    aliases:
+      - "moneytop"
+  bank:
+    enabled: true
+    name: "bank"
+    permission: "vault.command.bank"
+    aliases:
+      - "sharedbank"
+  loan:
+    enabled: true
+    name: "loan"
+    permission: "vault.command.loan"
+    aliases:
+      - "loans"
+  mailbox:
+    enabled: true
+    name: "mailbox"
+    permission: "vault.command.mailbox"
+    aliases:
+      - "mail"
+  escrow:
+    enabled: true
+    name: "escrow"
+    permission: "vault.command.escrow"
+    aliases: []
+  stocks:
+    enabled: true
+    name: "stocks"
+    permission: "vault.command.stocks"
+    aliases:
+      - "stockmarket"
+  exchange:
+    enabled: true
+    name: "exchange"
+    permission: "vault.convert"
+    aliases:
+      - "forex"
+      - "convert"
+  eco:
+    enabled: true
+    name: "eco"
+    permission: "vault.admin"
+    aliases:
+      - "economy"
+  check:
+    enabled: true
+    name: "check"
+    permission: "vault.command.check"
+    aliases:
+      - "cheque"
+  payday:
+    enabled: true
+    name: "payday"
+    permission: "vault.command.payday"
+    aliases:
+      - "salary"
+  transactions:
+    enabled: true
+    name: "transactions"
+    permission: "vault.command.transactions"
+    aliases:
+      - "tx"
+      - "history"
+  subscribe:
+    enabled: true
+    name: "subscribe"
+    permission: "vault.command.subscribe"
+    aliases:
+      - "subscriptions"
+  dynamicpricing:
+    enabled: true
+    name: "dynamicpricing"
+    permission: "vault.admin"
+    aliases:
+      - "dp"
+      - "dynamic"
+  blackmarket:
+    enabled: true
+    name: "blackmarket"
+    permission: "vault.command.blackmarket"
+    aliases:
+      - "launder"
+      - "marchenoir"
+      - "dirty"
+  discord:
+    enabled: true
+    name: "discord"
+    permission: "vault.command.discord"
+    aliases:
+      - "linkdiscord"
+
+# Discord Bot & Webhooks Configuration
+discord:
+  enabled: true
+  # Webhook URLs for automatic notifications
+  webhooks:
+    mailbox:
+      enabled: true
+      url: "YOUR_DISCORD_WEBHOOK_URL_HERE"
+    payday:
+      enabled: true
+      url: "YOUR_DISCORD_WEBHOOK_URL_HERE"
+    stocks:
+      enabled: true
+      url: "YOUR_DISCORD_WEBHOOK_URL_HERE"
+    security:
+      enabled: true
+      url: "YOUR_DISCORD_WEBHOOK_URL_HERE"
+  # Player account linking settings (/vx discord link)
+  account-linking:
+    enabled: true
+    link-code-expire-minutes: 10
+  # Discord bot configuration for running /bal or /pay directly from Discord
+  bot:
+    enabled: false
+    token: "YOUR_DISCORD_BOT_TOKEN_HERE"
+
+# Towny / Lands / Factions Integration Settings
+towns-lands-factions:
+  enabled: true
+  # Automatically link VaultX shared bank accounts (/bank) with Towny/Lands/Factions banks
+  auto-link-banks: true
+  # Enable town mayors / faction leaders to create tax subscriptions for members
+  tax-subscriptions:
+    enabled: true
+    default-interval-minutes: 1440
+
+# Black Market & Money Laundering System (/blackmarket, /vx launder)
+blackmarket:
+  enabled: true
+  # Mode for dirty money: 'CURRENCY' (tracked in VaultX as dirty_money) or 'ITEM' (physical marked item)
+  dirty-money-mode: "CURRENCY"
+  # Item settings when dirty-money-mode is set to 'ITEM'
+  item:
+    material: "PAPER"
+    name: "&c&lMarked Dirty Money"
+    lore:
+      - "&7Stolen / illegal funds."
+      - "&7Must be laundered at the Black Market!"
+    custom-model-data: 1001
+  # Money laundering fee percentage collected by the Black Market (e.g. 20.0 = 20% commission fee)
+  laundering-fee-percent: 20.0
+  # Police seizure / confiscation risk chance percentage (e.g. 5.0 = 5% chance of getting busted and losing funds)
+  seizure-risk-percent: 5.0
+  # Maximum amount of dirty money that can be laundered per transaction (Set to 0 for unlimited)
+  max-per-transaction: 500000.0
+
+settings:
+  # Enable automatic update checking at startup
+  check-updates: true
+

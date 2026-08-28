@@ -1,0 +1,317 @@
+# =======================================================
+# VaultX GUI - Configuration
+# =======================================================
+
+# Global GUI Settings
+filler-item:
+  material: "STAINED_GLASS_PANE"
+  data: 15
+  name: "§7"
+
+back-item:
+  material: "BARRIER"
+  name: "§cBack"
+  slot: 31
+  lore:
+    - "§7Return to dashboard"
+
+# Global Currency Displays
+# Add your custom currencies here to display them in the /vx dashboard and exchange GUI.
+# You can set a custom inventory slot (0-35) for each currency on the dashboard.
+currencies:
+  default:
+    material: "GOLD_INGOT"
+    name: "§e§lLocal Currency"
+    slot: 10
+  gems:
+    material: "EMERALD"
+    name: "§a§lGems"
+    slot: 11
+  tokens:
+    material: "DIAMOND"
+    name: "§b§lTokens"
+    slot: 12
+  # Example of a custom currency:
+  # rubies:
+  #   material: "REDSTONE"
+  #   name: "§c§lRubies"
+  #   slot: 13
+
+# Dashboard Menu Settings
+dashboard:
+  title: "§d§lVaultX Dashboard"
+  size: 36
+  items:
+    default-currency:
+      material: "GOLD_INGOT"
+      name: "§e§lLocal Currency"
+      lore:
+        - "§fBalance: §e%balance%"
+    gems-currency:
+      material: "EMERALD"
+      name: "§a§lGems"
+      lore:
+        - "§fBalance: §a%balance%"
+    tokens-currency:
+      material: "DIAMOND"
+      name: "§b§lTokens"
+      lore:
+        - "§fBalance: §b%balance%"
+    exchange:
+      material: "GOLD_NUGGET"
+      name: "§6§lCurrency Exchange"
+      slot: 14
+      lore:
+        - "§7Dynamic rates and conversion"
+    history:
+      material: "PAPER"
+      name: "§f§lTransaction History"
+      slot: 15
+      lore:
+        - "§7View your recent transactions"
+    mailbox:
+      material: "CHEST"
+      name: "§d§lMailbox"
+      slot: 16
+      lore:
+        - "§7Click to claim your"
+        - "§7offline payments received."
+    stocks:
+      material: "GOLD_INGOT"
+      name: "§e§lStock Market & Shares"
+      slot: 20
+      lore:
+        - "§7Invest in commodities"
+        - "§7or buy bank shares."
+    escrow:
+      material: "BOOK"
+      name: "§b§lEscrow Management"
+      slot: 22
+      lore:
+        - "§7Secure your business trades"
+        - "§7with a trusted third-party."
+    loans:
+      material: "PAPER"
+      name: "§c§lLoans & Guild Credit"
+      slot: 24
+      lore:
+        - "§7Apply for micro-credit or"
+        - "§7view your active installments."
+    blackmarket:
+      material: "WITHER_SKELETON_SKULL"
+      name: "§8§lBlack Market & Laundering"
+      slot: 25
+      lore:
+        - "§7Launder dirty money"
+        - "§7into clean cash."
+    discord-link:
+      material: "BOOK"
+      name: "§9§lDiscord Integration"
+      slot: 17
+      lore:
+        - "§7Link your account to Discord"
+        - "§7to manage balance & payouts."
+
+# Black Market Menu Settings
+blackmarket:
+  title: "§8§lMarché Noir - Blanchiment"
+  size: 27
+  items:
+    dirty-info:
+      material: "REDSTONE_BLOCK"
+      name: "§c§lDirty Money Balance"
+      slot: 11
+      lore:
+        - "§fDirty Money: §c%dirty%"
+        - "§7Unusable in legitimate shops."
+    clean-info:
+      material: "EMERALD_BLOCK"
+      name: "§a§lClean Cash Balance"
+      slot: 15
+      lore:
+        - "§fClean Cash: §a%clean%"
+        - "§7Usable everywhere."
+    launder-100:
+      material: "HOPPER"
+      name: "§e§lLaunder 100$"
+      slot: 12
+      lore:
+        - "§fDirty Amount: §c100$"
+        - "§fFee (%fee%%): §e%fee_amount%$"
+        - "§fRisk: §c%risk%% chance of raid"
+        - "§7"
+        - "§eClick to process laundering!"
+    launder-1000:
+      material: "HOPPER"
+      name: "§e§lLaunder 1,000$"
+      slot: 13
+      lore:
+        - "§fDirty Amount: §c1,000$"
+        - "§fFee (%fee%%): §e%fee_amount%$"
+        - "§fRisk: §c%risk%% chance of raid"
+        - "§7"
+        - "§eClick to process laundering!"
+    launder-all:
+      material: "GOLD_BLOCK"
+      name: "§a§lLaunder ALL Dirty Money"
+      slot: 14
+      lore:
+        - "§fDirty Amount: §c%dirty%"
+        - "§fFee (%fee%%): §e%fee_amount%$"
+        - "§fRisk: §c%risk%% chance of raid"
+        - "§7"
+        - "§eClick to process all dirty money!"
+
+
+# Stocks & Commodities Menu Settings
+stocks:
+  title: "§d§lStock Market & Banks"
+  items:
+    gold:
+      material: "GOLD_INGOT"
+      name: "§e§lGold"
+    iron:
+      material: "IRON_INGOT"
+      name: "§f§lIron"
+    emerald:
+      material: "EMERALD"
+      name: "§a§lEmerald"
+    diamond:
+      material: "DIAMOND"
+      name: "§b§lDiamond"
+    bank-shares:
+      material: "CHEST"
+      name: "§d§lShares: %bank%"
+      lore:
+        - "§fBank: §e%bank%"
+        - "§fBank Balance: §a%balance%"
+        - "§fShare Price (1%): §e%price%"
+        - "§fYour Shares: §a%owned% / 100"
+        - "§7"
+        - "§eLeft-Click » Buy 1 share (§f%price%§e)"
+        - "§cRight-Click » Sell 1 share (§f%sell_price%§c)"
+
+# Loans Menu Settings
+loans:
+  title: "§c§lYour Loans & Credits"
+  items:
+    loan-entry:
+      material: "PAPER"
+      name: "§e§lLoan ID: %id%"
+      lore:
+        - "§fLending Bank: §e%bank%"
+        - "§fPrincipal: §7%principal%"
+        - "§fRepaid: §a%paid% / %total%"
+        - "§fRemaining: §c%remaining%"
+        - "§fNext Installment: §7%next%"
+        - "§7"
+        - "§eClick to prepay installment"
+    salary-garnishment:
+      material: "BARRIER"
+      name: "§c§lSalary Garnishment"
+      lore:
+        - "§fDebt to Treasury: §c%debt%"
+        - "§7"
+        - "§7This debt will be automatically deducted"
+        - "§7by 10% on your next paydays."
+
+# Transaction History Menu Settings
+history:
+  title: "§8Transaction History"
+  items:
+    history-entry:
+      deposit-material: "EMERALD"
+      withdraw-material: "PAPER"
+      name: "%color%§l%type%"
+      lore:
+        - "§fAmount: %color%%prefix%%amount% %currency%"
+        - "§fParty: §7%party%"
+        - "§fCategory: §7%category%"
+        - "§fDate: §7%date%"
+
+# Exchange Menu Settings
+exchange:
+  title: "§6Dynamic Currency Exchange"
+  items:
+    convert:
+      material: "GOLD_NUGGET"
+      name: "§6§lCONVERT!"
+      lore:
+        - "§7Current Rate: §f1 %from% = §e%rate% %to%"
+        - "§7Exchange Fee: §f%tax%"
+        - ""
+        - "§e▶ Left-Click: §fConvert 10 %from%"
+        - "§e▶ Right-Click: §fConvert 100 %from%"
+        - "§e▶ Shift + Left: §fConvert 1000 %from%"
+        - "§e▶ Shift + Right: §fConvert 1 %from%"
+    selector:
+      name: "§fConvert %prefix%: %name%"
+      lore:
+        - "§7Click to change currency"
+
+# Escrow Menu Settings
+escrow:
+  title: "§8Escrow Management"
+  items:
+    escrow-entry:
+      sender-material: "RED_WOOL"
+      receiver-material: "GREEN_WOOL"
+      name: "§6Escrow: %short_id%"
+      lore:
+        - "§fID: §7%id%"
+        - "§fSender: §7%sender%"
+        - "§fReceiver: §7%receiver%"
+        - "§fAmount: §e%amount% %currency%"
+        - "§fStatus: §7%status%"
+        - "§fTime Remaining: §7%time%s"
+        - ""
+      lore-actions:
+        sender-pending:
+          - "§e▶ Left-Click: §aRelease funds"
+          - "§e▶ Right-Click: §cClaim refund (if expired)"
+        receiver-pending:
+          - "§e▶ Left-Click: §cReturn to sender"
+
+# Mailbox Menu Settings
+mailbox:
+  title: "§dEconomic Mailbox"
+  items:
+    mail-entry:
+      material: "CHEST"
+      name: "§dTransfer from: §f%sender%"
+      lore:
+        - "§fAmount: §e%amount% %currency%"
+        - "§fMessage: §7%message%"
+        - "§fReceived: §7%date%"
+        - ""
+        - "§e▶ Click to claim these funds"
+    claim-all:
+      material: "GOLD_NUGGET"
+      name: "§a§lCLAIM ALL"
+      lore:
+        - "§7Click to empty and claim"
+        - "§7all funds from your mailbox."
+
+# Admin Macroeconomic Stats Menu Settings
+admin_stats:
+  title: "§b§lMacroeconomic Stats"
+  items:
+    central-bank:
+      material: "GOLD_BLOCK"
+      name: "§6§lCentral Bank Reserve"
+      slot: 14
+      lore:
+        - "§fTreasury Account: §7%treasury%"
+        - "§fReserve Balance: §e%balance%"
+    debts:
+      material: "REDSTONE"
+      name: "§c§lMacroeconomic Debts"
+      slot: 15
+      lore:
+        - "§fActive Bank Loans: §7%loans_debt%"
+        - "§fGarnishment Debts: §7%player_debts%"
+        - "§c§lTotal Debts: §e%total_debt%"
+    leaderboard:
+      material: "BOOK"
+      name: "§d§lWealth Leaderboard"
+      slot: 16

@@ -1,0 +1,27 @@
+[CENTER][SIZE=6][COLOR=#ffcc00][B]VaultX v1.1.0 - Dynamic Pricing, Inflation Engine & Granular Permissions Update[/B][/COLOR][/SIZE]
+
+[LIST]
+[*] [COLOR=#ffcc00][B]Dynamic Pricing & Inflation Engine (DynamicPricingManager):[/B][/COLOR] Added an automated macroeconomic inflation engine that measures total circulating money supply in real time (RAM balance cache + SQL database balance sums). Calculates an Inflation Index Multiplier ($M$) based on a reference baseline money supply ($B$), elasticity factor ($k$), and configurable bounds ($M_{min}, M_{max}$), dynamically adjusting server buy/sell prices and tax rates to preserve economic balance.
+[*] [COLOR=#ffcc00][B]Custom Bukkit Event (VaultInflationUpdateEvent):[/B][/COLOR] Integrated an asynchronous Bukkit event [I]VaultInflationUpdateEvent[/I] dispatched whenever inflation multipliers or money supply ratios are recalculated. Allows third-party shop plugins, eco addons, and custom scripts to react to server market fluctuations.
+[*] [COLOR=#ffcc00][B]Comprehensive PlaceholderAPI Support for Dynamic Pricing:[/B][/COLOR] Added a full suit of new PlaceholderAPI placeholders for server shops, scoreboards, and HUDs:
+  [LIST]
+  [*] [COLOR=#e0e0e0]%vaultx_inflation_multiplier%[/COLOR] & [COLOR=#e0e0e0]%vaultx_inflation_multiplier_<currency>%[/COLOR] (e.g. 1.20)
+  [*] [COLOR=#e0e0e0]%vaultx_inflation_percent%[/COLOR] & [COLOR=#e0e0e0]%vaultx_inflation_percent_<currency>%[/COLOR] (e.g. +20.0%)
+  [*] [COLOR=#e0e0e0]%vaultx_dynamic_price_<basePrice>%[/COLOR] & [COLOR=#e0e0e0]%vaultx_dynamic_price_formatted_<basePrice>%[/COLOR] (e.g. $120.00)
+  [*] [COLOR=#e0e0e0]%vaultx_dynamic_sell_price_<basePrice>%[/COLOR] & [COLOR=#e0e0e0]%vaultx_dynamic_sell_price_formatted_<basePrice>%[/COLOR]
+  [*] [COLOR=#e0e0e0]%vaultx_dynamic_tax_<baseTax>%[/COLOR] (e.g. 2.40%)
+  [*] [COLOR=#e0e0e0]%vaultx_money_supply%[/COLOR] & [COLOR=#e0e0e0]%vaultx_baseline_supply%[/COLOR]
+  [/LIST]
+[*] [COLOR=#ffcc00][B]Dynamic Pricing Administrative Commands (/vx dp):[/B][/COLOR] Introduced a new suite of admin commands under [I]/vx dynamicpricing[/I] (aliases: [I]/vx dp[/I], [I]/vx dynamic[/I]):
+  [LIST]
+  [*] [COLOR=#e0e0e0]/vx dp info[/COLOR]: Displays a formatted macroeconomic status card showing money supplies, baseline values, inflation index multipliers, elasticity, and bounds for all registered currencies.
+  [*] [COLOR=#e0e0e0]/vx dp setbase <amount> [currency][/COLOR]: Manually configures the baseline money supply reference.
+  [*] [COLOR=#e0e0e0]/vx dp recalculate[/COLOR]: Triggers an immediate non-blocking money supply recalculation.
+  [*] [COLOR=#e0e0e0]/vx dp calc <basePrice> [currency][/COLOR]: Interactive simulation tool to preview adjusted buy and sell prices in real time.
+  [/LIST]
+[*] [COLOR=#ffcc00][B]Strict Command Permissions System:[/B][/COLOR] Updated [I]plugin.yml[/I] and [I]VaultXCommand[/I] to enforce strict permission nodes for every single command and subcommand. Implemented dynamic permission checking via [I]checkPermission[/I], respecting custom permissions configured per command inside [I]config.yml[/I] while falling back to defaults ([I]vault.use[/I], [I]vault.command.money[/I], [I]vault.command.pay[/I], [I]vault.top[/I], [I]vault.command.bank[/I], [I]vault.command.loan[/I], [I]vault.command.mailbox[/I], [I]vault.command.escrow[/I], [I]vault.command.stocks[/I], [I]vault.convert[/I], [I]vault.command.check[/I], [I]vault.command.payday[/I], [I]vault.command.transactions[/I], [I]vault.command.subscribe[/I], [I]vault.admin[/I]).
+[*] [COLOR=#ffcc00][B]High-Performance SQL Money Supply Aggregation:[/B][/COLOR] Added [I]getTotalCurrencyBalanceSum(currency)[/I] to [I]LocalFailoverManager[/I], executing optimized [I]SUM(balance)[/I] queries on SQLite/MySQL tables off the main thread for accurate money supply tracking across default and custom multi-currency accounts.
+[*] [COLOR=#ffcc00][B]Full Multi-Currency Dynamic Pricing Integration:[/B][/COLOR] Dynamic pricing automatically detects all registered custom currencies (e.g. Gems, Tokens) and calculates independent inflation indices per currency.
+[/LIST]
+ 
+[CENTER][B][COLOR=#ffcc00]Step into the future of Minecraft Economy. Install VaultX v1.1.0 now![/COLOR][/B][/CENTER]

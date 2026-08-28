@@ -1,0 +1,147 @@
+name: Vault
+version: ${project.version}
+description: ${project.description}
+authors: [SkyNex]
+
+main: ${mainClass}
+load: STARTUP
+api-version: "1.13"
+softdepend: [PlaceholderAPI, LuckPerms]
+folia-supported: true
+
+commands:
+  vault-info:
+    description: Displays information about Vault
+    permission: vault.admin
+  vault-convert:
+    description: Converts all data in economy1 and dumps it into economy2
+    permission: vault.admin
+  vaultx:
+    description: Main VaultX command for multicurrency economy management
+    aliases: [vx]
+    permission: vault.use
+  money:
+    description: Displays your balance or another player's balance
+    aliases: [balance, bal]
+    permission: vault.command.money
+  pay:
+    description: Pays a player from your balance
+    permission: vault.command.pay
+  baltop:
+    description: Displays the richest players
+    aliases: [moneytop]
+    permission: vault.top
+  bank:
+    description: Manage shared bank accounts
+    aliases: [sharedbank]
+    permission: vault.command.bank
+  loan:
+    description: Interact with the loan and debt system
+    aliases: [loans]
+    permission: vault.command.loan
+  mailbox:
+    description: Manage your offline transaction mailbox
+    aliases: [mail]
+    permission: vault.command.mailbox
+  escrow:
+    description: Secure trades via escrow
+    permission: vault.command.escrow
+  stocks:
+    description: Access the stock market
+    aliases: [stockmarket]
+    permission: vault.command.stocks
+  exchange:
+    description: Convert currencies
+    aliases: [forex, convert]
+    permission: vault.convert
+  eco:
+    description: Administrative economy commands
+    aliases: [economy]
+    permission: vault.admin
+  check:
+    description: Create physical economic checks
+    aliases: [cheque]
+    permission: vault.command.check
+  payday:
+    description: Displays details and countdown for your next salary payout
+    aliases: [salary]
+    permission: vault.command.payday
+  transactions:
+    description: View your transaction history in chat
+    aliases: [tx, history]
+    permission: vault.command.transactions
+  subscribe:
+    description: Manage your recurring payments and subscriptions
+    aliases: [subscriptions]
+    permission: vault.command.subscribe
+  dynamicpricing:
+    description: Dynamic pricing money supply engine settings and recalculations
+    aliases: [dp, dynamic]
+    permission: vault.admin
+  blackmarket:
+    description: Access the black market for money laundering
+    aliases: [launder, marchenoir, dirty]
+    permission: vault.command.blackmarket
+  discord:
+    description: Link and manage your Discord integration
+    aliases: [linkdiscord]
+    permission: vault.command.discord
+
+permissions:
+  vault.use:
+    description: Allows access to main VaultX menu and basic economy features
+    default: true
+  vault.admin:
+    description: Allows access to administrative commands
+    default: op
+  vault.command.money:
+    description: Allows checking balances
+    default: true
+  vault.command.pay:
+    description: Allows sending money to other players
+    default: true
+  vault.top:
+    description: Allows players to check the wealth leaderboard
+    default: true
+  vault.command.bank:
+    description: Allows creating and managing shared bank accounts
+    default: true
+  vault.command.loan:
+    description: Allows applying for loans and viewing loan information
+    default: true
+  vault.command.mailbox:
+    description: Allows claiming offline payments and checking mailbox
+    default: true
+  vault.command.escrow:
+    description: Allows creating and managing secure escrow trades
+    default: true
+  vault.command.stocks:
+    description: Allows accessing the stock exchange market
+    default: true
+  vault.convert:
+    description: Allows players to convert their currencies via command
+    default: true
+  vault.command.check:
+    description: Allows signing physical economic checks
+    default: true
+  vault.command.payday:
+    description: Allows checking salary breakdown and payday status
+    default: true
+  vault.command.transactions:
+    description: Allows viewing transaction history
+    default: true
+  vault.command.subscribe:
+    description: Allows managing recurring payments and subscriptions
+    default: true
+  vault.command.dynamicpricing:
+    description: Allows managing dynamic pricing money supply engine
+    default: op
+  vault.command.blackmarket:
+    description: Allows accessing the Black Market and laundering dirty money
+    default: true
+  vault.command.discord:
+    description: Allows linking account to Discord
+    default: true
+  vault.firewall.bypass:
+    description: Allows bypassing the security firewall checks
+    default: op

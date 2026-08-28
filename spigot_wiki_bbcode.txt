@@ -1,0 +1,937 @@
+[CENTER]
+[SIZE=6][B][COLOR=#FFD700]📖  VAULT[/COLOR][COLOR=#E8E8E8]X[/COLOR][COLOR=#FFD700]  —  DOCUMENTATION[/COLOR][/B][/SIZE]
+[SIZE=3][COLOR=#555555]◈ ────────────────────────────────────────────────────────────── ◈[/COLOR][/SIZE]
+[SIZE=4][COLOR=#AAAAAA]Complete technical reference for server administrators & developers[/COLOR][/SIZE]
+[SIZE=3][COLOR=#555555]◈ ────────────────────────────────────────────────────────────── ◈[/COLOR][/SIZE]
+[/CENTER]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]📦  1.  INSTALLATION[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[LIST=1]
+[*][COLOR=#DDDDDD][B]Remove[/B] any existing [/COLOR][COLOR=#E8E8E8]Vault.jar[/COLOR][COLOR=#DDDDDD] from your [/COLOR][COLOR=#E8E8E8]/plugins/[/COLOR][COLOR=#DDDDDD] folder. VaultX is a full drop-in replacement and registers itself as the [B]Vault[/B] service natively.[/COLOR]
+[*][COLOR=#DDDDDD][B]Download[/B] the latest [/COLOR][COLOR=#FFD700]VaultX.jar[/COLOR][COLOR=#DDDDDD] and place it in [/COLOR][COLOR=#E8E8E8]/plugins/[/COLOR][COLOR=#DDDDDD].[/COLOR]
+[*][COLOR=#DDDDDD][B]Restart[/B] your server. VaultX will activate its interception engine and generate a [/COLOR][COLOR=#E8E8E8]config.yml[/COLOR][COLOR=#DDDDDD].[/COLOR]
+[*][COLOR=#DDDDDD]Verify activation by checking the console for the [/COLOR][COLOR=#5EFF8A]"Vault Modern Edition successfully enabled!"[/COLOR][COLOR=#DDDDDD] message.[/COLOR]
+[*][COLOR=#DDDDDD][B]Optional:[/B] Install [B]PlaceholderAPI[/B] to unlock balance and leaderboard placeholders.[/COLOR]
+[*][COLOR=#DDDDDD][B]Optional:[/B] Configure a [B]Redis[/B] server in [/COLOR][COLOR=#E8E8E8]config.yml[/COLOR][COLOR=#DDDDDD] to enable cross-server synchronization.[/COLOR]
+[/LIST]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]⚙️  2.  ARCHITECTURE & CACHING ENGINE[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[B][COLOR=#FFFFFF]How the O(1) Intercept Engine works:[/COLOR][/B]
+
+[LIST]
+[*][B][COLOR=#FFD700]Dynamic Wrapping:[/COLOR][/B] [COLOR=#AAAAAA]VaultX intercepts any incoming economy plugin (e.g. EssentialsX) at the highest service priority and wraps it in an [/COLOR][COLOR=#E0E0E0]OptimizedEconomy[/COLOR][COLOR=#AAAAAA] decorator. This works both at startup and dynamically when plugins register themselves later.[/COLOR]
+
+[*][B][COLOR=#FFD700]Online-Only Memory Cache:[/COLOR][/B] [COLOR=#AAAAAA]Balances for online players are cached in a [/COLOR][COLOR=#E0E0E0]ConcurrentHashMap[/COLOR][COLOR=#AAAAAA]. A configurable TTL ([/COLOR][COLOR=#E0E0E0]cache-ttl-ms[/COLOR][COLOR=#AAAAAA], default: 1000ms) prevents stale values if other plugins modify balances directly. No stale data risk for offline players.[/COLOR]
+
+[*][B][COLOR=#FFD700]Offline Player Balance Cache:[/COLOR][/B] [COLOR=#AAAAAA]Balances queried for offline players are cached in a thread-safe cache with a 10-second TTL to prevent database spam during high-volume lookups.[/COLOR]
+
+[*][B][COLOR=#FFD700]Automatic Cache Invalidation:[/COLOR][/B] [COLOR=#AAAAAA]Every deposit or withdrawal instantly updates the memory cache in real-time. On player disconnect, their cache slot is fully purged.[/COLOR]
+
+[*][B][COLOR=#FFD700]Balance Pre-Warming:[/COLOR][/B] [COLOR=#AAAAAA]When a player connects, their main balance is loaded synchronously (ensuring immediate availability for delegate economy plugins) while custom currency balances are pre-loaded asynchronously off the main thread.[/COLOR]
+
+[*][B][COLOR=#FFD700]ServicePriority.Highest:[/COLOR][/B] [COLOR=#AAAAAA]VaultX forces its wrapper to register at the highest service priority, ensuring all downstream plugins always hit the fast-track cached system first.[/COLOR]
+
+[*][B][COLOR=#FFD700]SQLite WAL Mode:[/COLOR][/B] [COLOR=#AAAAAA]When using SQLite storage, VaultX automatically configures Write-Ahead Logging ([/COLOR][COLOR=#E0E0E0]PRAGMA journal_mode=WAL[/COLOR][COLOR=#AAAAAA]) and [/COLOR][COLOR=#E0E0E0]PRAGMA synchronous=NORMAL[/COLOR][COLOR=#AAAAAA]. This delivers up to 10x–100x faster write speeds and allows non-blocking concurrent reads.[/COLOR]
+
+[*][B][COLOR=#FFD700]Thread-Safe MySQL Connection Pool:[/COLOR][/B] [COLOR=#AAAAAA]When using MySQL/MariaDB, an internal connection pool (max: 10 connections, pre-warmed with 3) handles asynchronous transactions concurrently without blocking the main server thread.[/COLOR]
+
+[*][B][COLOR=#FFD700]Functional Query Templates:[/COLOR][/B] [COLOR=#AAAAAA]Standardized database interactions using [/COLOR][COLOR=#E0E0E0]DbConsumer[/COLOR][COLOR=#AAAAAA] and [/COLOR][COLOR=#E0E0E0]DbFunction[/COLOR][COLOR=#AAAAAA] patterns guarantee that connections are always safely returned to the pool, preventing memory leaks and connection exhaustion.[/COLOR]
+
+[*][B][COLOR=#FFD700]Database Query Indexing:[/COLOR][/B] [COLOR=#AAAAAA]Composite indexes [/COLOR][COLOR=#E0E0E0](uuid, id)[/COLOR][COLOR=#AAAAAA] are added on [/COLOR][COLOR=#E0E0E0]player_transactions[/COLOR][COLOR=#AAAAAA] and [/COLOR][COLOR=#E0E0E0]security_audits[/COLOR][COLOR=#AAAAAA] tables to eliminate full-table scans. On MySQL/MariaDB, the plugin checks [/COLOR][COLOR=#E0E0E0]information_schema[/COLOR][COLOR=#AAAAAA] before index creation to guarantee backwards compatibility.[/COLOR]
+
+[*][B][COLOR=#FFD700]Asynchronous Batch Writer (VaultX-BatchWriter):[/COLOR][/B] [COLOR=#AAAAAA]A background daemon thread drains transaction, audit, and sync queues every 1 second, batching updates within single SQL transactions to speed up writes by 50x+ and eliminate disk contention on SQLite/MySQL.[/COLOR]
+[/LIST]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]📡  3.  REDIS CROSS-SERVER SYNCHRONIZATION[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[COLOR=#AAAAAA]VaultX integrates a production-grade Redis Pub/Sub synchronization layer to keep balances consistent across an entire network of servers in real-time.[/COLOR]
+
+[LIST]
+[*][B][COLOR=#FFD700]Balance Sync:[/COLOR][/B] [COLOR=#AAAAAA]Every transaction is published to a Redis Pub/Sub channel (default: [/COLOR][COLOR=#E0E0E0]vaultx:economy:sync[/COLOR][COLOR=#AAAAAA]). All connected servers receive the update and refresh their local caches instantly.[/COLOR]
+
+[*][B][COLOR=#FFD700]Jedis Connection Pool:[/COLOR][/B] [COLOR=#AAAAAA]Uses a configurable Jedis pool (default: [/COLOR][COLOR=#E0E0E0]max-connections: 16[/COLOR][COLOR=#AAAAAA]) with a configurable [/COLOR][COLOR=#E0E0E0]connection-timeout-ms[/COLOR][COLOR=#AAAAAA] (default: 2000ms).[/COLOR]
+
+[*][B][COLOR=#FFD700]Heartbeat Check:[/COLOR][/B] [COLOR=#AAAAAA]A background task verifies Redis connectivity every [/COLOR][COLOR=#E0E0E0]heartbeat-interval-seconds[/COLOR][COLOR=#AAAAAA] (default: 5s). If Redis goes offline, VaultX automatically switches to database failover mode without any player impact.[/COLOR]
+
+[*][B][COLOR=#FFD700]Exponential Backoff Reconnect:[/COLOR][/B] [COLOR=#AAAAAA]If Redis goes offline, the reconnect delay scales exponentially ([/COLOR][COLOR=#E0E0E0]baseDelay × 1.5^attempts[/COLOR][COLOR=#AAAAAA]) up to a 60-second ceiling, with ±20% random jitter to prevent reconnect storms on large proxy networks.[/COLOR]
+
+[*][B][COLOR=#FFD700]Auto-Reconnect Failover:[/COLOR][/B] [COLOR=#AAAAAA]When Redis comes back online, queued balance updates stored in the local database are automatically flushed to Redis.[/COLOR]
+
+[*][B][COLOR=#FFD700]Distributed Account Freeze:[/COLOR][/B] [COLOR=#AAAAAA]Frozen player accounts are synced across all servers via a Redis Set ([/COLOR][COLOR=#E0E0E0]vaultx:frozen_players[/COLOR][COLOR=#AAAAAA]) and Pub/Sub events.[/COLOR]
+
+[*][B][COLOR=#FFD700]Distributed Mutex Locks:[/COLOR][/B] [COLOR=#AAAAAA]Atomic Redis locks ([/COLOR][COLOR=#E0E0E0]vaultx:lock:[uuid]:[currency][/COLOR][COLOR=#AAAAAA]) prevent race conditions when two servers attempt to modify the same account simultaneously.[/COLOR]
+
+[*][B][COLOR=#FFD700]Leaderboard ZSET:[/COLOR][/B] [COLOR=#AAAAAA]Every balance update also writes to Redis Sorted Sets ([/COLOR][COLOR=#E0E0E0]vaultx:leaderboard:[currency][/COLOR][COLOR=#AAAAAA]) to maintain a real-time global wealth ranking.[/COLOR]
+
+[*][B][COLOR=#FFD700]Latest-Write-Wins (LWW) Reconciliation:[/COLOR][/B] [COLOR=#AAAAAA]When a server reconnects after a Redis outage, VaultX compares local database timestamps against Redis global values and applies the most recent write, preventing balance divergence and money duplication.[/COLOR]
+
+[*][B][COLOR=#FFD700]Cross-Server Escrow:[/COLOR][/B] [COLOR=#AAAAAA]Funds involved in cross-server trades are locked in a pending state using Redis distributed mutex locks, with automatic refund tasks checking for expired escrows.[/COLOR]
+[/LIST]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]💾  4.  LOCAL DATABASE STORAGE & FAILOVER[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[COLOR=#AAAAAA]VaultX supports [B]SQLite[/B] (local) or [B]MySQL / MariaDB[/B] (shared) as its resilient failover layer. If Redis goes offline, the plugin falls back to database storage automatically. All operations are fully thread-safe and run asynchronously.[/COLOR]
+
+[B][COLOR=#FFFFFF]Managed database tables:[/COLOR][/B]
+[LIST]
+[*][B][COLOR=#FFD700]pending_syncs:[/COLOR][/B] [COLOR=#AAAAAA]Queues balance modifications made while Redis is offline. These are flushed to Redis as soon as connectivity is restored.[/COLOR]
+[*][B][COLOR=#FFD700]local_banks:[/COLOR][/B] [COLOR=#AAAAAA]Fallback bank storage, updated on every bank transaction and backed up periodically.[/COLOR]
+[*][B][COLOR=#FFD700]security_audits:[/COLOR][/B] [COLOR=#AAAAAA]Permanent history of all security incidents, rate limit infractions, and freeze/unfreeze events. Queried via [/COLOR][COLOR=#E0E0E0]/eco admin audit[/COLOR][COLOR=#AAAAAA].[/COLOR]
+[*][B][COLOR=#FFD700]custom_currency_balances:[/COLOR][/B] [COLOR=#AAAAAA]Persists player balances for all custom currencies (Gems, Tokens, etc.) with a [/COLOR][COLOR=#E0E0E0]last_updated[/COLOR][COLOR=#AAAAAA] timestamp to support LWW reconciliation.[/COLOR]
+[*][B][COLOR=#FFD700]player_transactions:[/COLOR][/B] [COLOR=#AAAAAA]Detailed ledger of all deposits and withdrawals with automatic category tagging (SHOP, QUEST, ADMIN, JOB) based on the caller namespace.[/COLOR]
+[*][B][COLOR=#FFD700]local_escrows:[/COLOR][/B] [COLOR=#AAAAAA]Stores active, completed, or refunded escrow transactions to guarantee transactional integrity without Redis.[/COLOR]
+[*][B][COLOR=#FFD700]pending_webhooks:[/COLOR][/B] [COLOR=#AAAAAA]Persists failed or rate-limited Discord webhook alerts for asynchronous retry via exponential backoff.[/COLOR]
+[*][B][COLOR=#FFD700]daily_analytics:[/COLOR][/B] [COLOR=#AAAAAA]Aggregates daily statistics of money created and destroyed across categories to monitor inflation trends.[/COLOR]
+[/LIST]
+[COLOR=#AAAAAA]All security firewall events are also appended to a plain-text [B]security_audit.log[/B] file in the plugin directory.[/COLOR]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]🛡️  5.  SECURITY FIREWALL[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[COLOR=#AAAAAA]VaultX includes a multi-layer transaction security system protecting your economy from exploits, duplication glitches, and bot abuse.[/COLOR]
+
+[SIZE=3] [/SIZE]
+
+[B][COLOR=#FFFFFF]Layer 1 — Rate Limiter (Anti-Duplication Shield):[/COLOR][/B]
+[LIST]
+[*][COLOR=#AAAAAA]Counts transactions per second for each player UUID.[/COLOR]
+[*][COLOR=#AAAAAA]If a player exceeds [/COLOR][COLOR=#E0E0E0]max-transactions-per-second[/COLOR][COLOR=#AAAAAA] (default: [B]20[/B]), their account is blocked for [/COLOR][COLOR=#E0E0E0]cooldown-seconds[/COLOR][COLOR=#AAAAAA] (default: [B]5s[/B]).[/COLOR]
+[*][COLOR=#AAAAAA]Triggers a Discord Webhook alert (if enabled) classified as [B]RATE_LIMIT_EXCEEDED 🟡[/B].[/COLOR]
+[/LIST]
+
+[B][COLOR=#FFFFFF]Layer 2 — Transaction Firewall:[/COLOR][/B]
+[LIST]
+[*][B][COLOR=#FFD700]Account Freeze Check:[/COLOR][/B] [COLOR=#AAAAAA]All transactions from frozen accounts are blocked instantly.[/COLOR]
+[*][B][COLOR=#FFD700]Single Transaction Limit:[/COLOR][/B] [COLOR=#AAAAAA]Any single deposit or withdrawal exceeding [/COLOR][COLOR=#E0E0E0]max-single-transaction[/COLOR][COLOR=#AAAAAA] (default: [B]10,000,000[/B]) is blocked. If [/COLOR][COLOR=#E0E0E0]auto-freeze: true[/COLOR][COLOR=#AAAAAA], the player is frozen automatically. Triggers a 🔴 [B]TRANSACTION_BLOCKED[/B] alert.[/COLOR]
+[*][B][COLOR=#FFD700]Large Transaction Alert:[/COLOR][/B] [COLOR=#AAAAAA]Transactions exceeding [/COLOR][COLOR=#E0E0E0]large-transaction-threshold[/COLOR][COLOR=#AAAAAA] (default: [B]500,000[/B]) trigger a Discord alert even if the transaction is allowed.[/COLOR]
+[*][B][COLOR=#FFD700]Heuristic Spike Detection:[/COLOR][/B] [COLOR=#AAAAAA]Tracks deposits over a rolling window (default: [B]60s[/B]). If the total exceeds the player's baseline multiplied by [/COLOR][COLOR=#E0E0E0]factor[/COLOR][COLOR=#AAAAAA] (default: [B]5.0[/B]) and is above [/COLOR][COLOR=#E0E0E0]minimum-threshold[/COLOR][COLOR=#AAAAAA] (default: [B]10,000[/B]), the player is frozen. Triggers a 🔴 [B]SPIKE_DETECTED[/B] alert.[/COLOR]
+[/LIST]
+
+[B][COLOR=#FFFFFF]Discord Webhook Alerts:[/COLOR][/B]
+[COLOR=#AAAAAA]Security events are sent as rich Discord Embeds to a staff channel. Each alert includes:[/COLOR]
+[LIST]
+[*][COLOR=#AAAAAA]Alert type: [B]FREEZE 🔴[/B], [B]UNFREEZE 🟢[/B], [B]TRANSACTION_BLOCKED 🔴[/B], [B]SPIKE_DETECTED 🔴[/B], [B]RATE_LIMIT_EXCEEDED 🟡[/B][/COLOR]
+[*][COLOR=#AAAAAA]Player name and UUID[/COLOR]
+[*][COLOR=#AAAAAA]Detailed reason and amounts[/COLOR]
+[*][COLOR=#AAAAAA]Timestamp[/COLOR]
+[/LIST]
+[COLOR=#AAAAAA]To enable, set [/COLOR][COLOR=#E0E0E0]security.firewall.discord-webhook.enabled: true[/COLOR][COLOR=#AAAAAA] and paste your webhook URL in [/COLOR][COLOR=#E0E0E0]config.yml[/COLOR][COLOR=#AAAAAA].[/COLOR]
+
+[B][COLOR=#FFFFFF]Resilient Webhook Retry Queue:[/COLOR][/B]
+[LIST]
+[*][COLOR=#AAAAAA]If Discord is rate-limited (HTTP 429) or offline, the payload is saved in the [/COLOR][COLOR=#E0E0E0]pending_webhooks[/COLOR][COLOR=#AAAAAA] table.[/COLOR]
+[*][COLOR=#AAAAAA]An async task retries every 10 seconds using Exponential Backoff ([/COLOR][COLOR=#E0E0E0]15s × 2^attempts[/COLOR][COLOR=#AAAAAA]).[/COLOR]
+[*][COLOR=#AAAAAA]Limited to 10 retry attempts before discarding to prevent database bloat.[/COLOR]
+[/LIST]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]💱  6.  MULTI-CURRENCY SYSTEM[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[COLOR=#AAAAAA]VaultX natively extends the Vault Economy API with full multi-currency support, compatible with any plugin using the [B]MultiCurrencyEconomy[/B] interface.[/COLOR]
+
+[LIST]
+[*][B][COLOR=#FFD700]Supported Currencies:[/COLOR][/B] [COLOR=#AAAAAA]The default currency is always available. Additional currencies (e.g. [B]Gems[/B], [B]Tokens[/B]) are defined in [/COLOR][COLOR=#E0E0E0]currency-exchange.rates[/COLOR][COLOR=#AAAAAA].[/COLOR]
+[*][B][COLOR=#FFD700]Custom Symbols:[/COLOR][/B] [COLOR=#AAAAAA]Each currency can have a custom chat symbol configured under [/COLOR][COLOR=#E0E0E0]currency-exchange.symbols[/COLOR][COLOR=#AAAAAA] (e.g. [/COLOR][COLOR=#E0E0E0]Gems: "&a✦"[/COLOR][COLOR=#AAAAAA], [/COLOR][COLOR=#E0E0E0]Tokens: "&b✪"[/COLOR][COLOR=#AAAAAA]). Falls back to the currency name if not defined.[/COLOR]
+[*][B][COLOR=#FFD700]Auto-Convert:[/COLOR][/B] [COLOR=#AAAAAA]If a player lacks funds in a specific currency, VaultX automatically deducts the equivalent from their default currency using the configured exchange rate ([/COLOR][COLOR=#E0E0E0]auto-convert: true[/COLOR][COLOR=#AAAAAA]).[/COLOR]
+[*][B][COLOR=#FFD700]Exchange Rates:[/COLOR][/B] [COLOR=#AAAAAA]Each currency's value is defined relative to the default currency. Example: 1 Gem = 1000 coins, 1 Token = 10 coins.[/COLOR]
+[*][B][COLOR=#FFD700]Redis-Backed:[/COLOR][/B] [COLOR=#AAAAAA]Custom currency balances are stored in Redis hashes ([/COLOR][COLOR=#E0E0E0]vaultx:balances:[uuid][/COLOR][COLOR=#AAAAAA]) and mirrored to the local database.[/COLOR]
+[/LIST]
+
+[B][COLOR=#FFFFFF]Dynamic Exchange Rates (Forex Engine):[/COLOR][/B]
+[COLOR=#AAAAAA]VaultX includes a live Forex engine that makes currency exchange rates fluctuate dynamically over time:[/COLOR]
+[LIST]
+[*][COLOR=#AAAAAA]Rates update every [/COLOR][COLOR=#E0E0E0]update-interval-minutes[/COLOR][COLOR=#AAAAAA] (default: [B]15 min[/B]) by a configurable [/COLOR][COLOR=#E0E0E0]max-fluctuation-percent[/COLOR][COLOR=#AAAAAA] (default: [B]3.5%[/B]).[/COLOR]
+[*][COLOR=#AAAAAA]A [/COLOR][COLOR=#E0E0E0]demand-factor[/COLOR][COLOR=#AAAAAA] (default: [B]0.001[/B]) adjusts rates based on traded volumes — high demand pushes rates up.[/COLOR]
+[*][COLOR=#AAAAAA][B]Market Events[/B] (Crash, Boom, Shortage) can fire randomly with a configurable [/COLOR][COLOR=#E0E0E0]chance-percent[/COLOR][COLOR=#AAAAAA] (default: [B]10%[/B]) per interval.[/COLOR]
+[/LIST]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]🏦  7.  NATIVE BANK SYSTEM[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[LIST]
+[*][B][COLOR=#FFD700]Redis-Synchronized Banks:[/COLOR][/B] [COLOR=#AAAAAA]Bank balances are managed via Redis ([/COLOR][COLOR=#E0E0E0]vaultx:banks[/COLOR][COLOR=#AAAAAA] hash) and synchronized across all servers in the network.[/COLOR]
+[*][B][COLOR=#FFD700]Database Backup & Failover:[/COLOR][/B] [COLOR=#AAAAAA]Banks are backed up to the database on a configurable interval ([/COLOR][COLOR=#E0E0E0]banks.backup.interval-minutes[/COLOR][COLOR=#AAAAAA], default: [B]30 min[/B]). On startup, the local database restores banks if Redis is offline or disabled.[/COLOR]
+[*][B][COLOR=#FFD700]Startup Safety Checks:[/COLOR][/B] [COLOR=#AAAAAA]If [/COLOR][COLOR=#E0E0E0]redis.enabled: false[/COLOR][COLOR=#AAAAAA] or Redis is unreachable, VaultX bypasses Redis initialization without throwing NPEs. Bank preloading runs asynchronously to prevent main-thread hangs.[/COLOR]
+[/LIST]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]🏛️  8.  CENTRAL BANK (TAXES, INTEREST & WEALTH TAX)[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[COLOR=#AAAAAA]VaultX includes a full Central Bank system to control economic supply and prevent runaway inflation.[/COLOR]
+
+[B][COLOR=#FFFFFF]Periodic Interest:[/COLOR][/B]
+[LIST]
+[*][COLOR=#AAAAAA]Interest is applied to all player balances at a configurable interval ([/COLOR][COLOR=#E0E0E0]central-bank.interest.interval-minutes[/COLOR][COLOR=#AAAAAA], default: [B]60 min[/B]).[/COLOR]
+[*][COLOR=#AAAAAA]Each currency has its own interest rate (e.g. [/COLOR][COLOR=#E0E0E0]default: 0.05%[/COLOR][COLOR=#AAAAAA], [/COLOR][COLOR=#E0E0E0]gems: 0.10%[/COLOR][COLOR=#AAAAAA], [/COLOR][COLOR=#E0E0E0]tokens: 0.02%[/COLOR][COLOR=#AAAAAA] per hour).[/COLOR]
+[*][COLOR=#AAAAAA]Bank account holders receive a bonus interest rate ([/COLOR][COLOR=#E0E0E0]bank-bonus-percent[/COLOR][COLOR=#AAAAAA], default: [B]+0.01%[/B]).[/COLOR]
+[/LIST]
+
+[B][COLOR=#FFFFFF]Transaction Taxes:[/COLOR][/B]
+[LIST]
+[*][B][COLOR=#FFD700]Pay Tax:[/COLOR][/B] [COLOR=#AAAAAA]A percentage tax on player-to-player transfers via [/COLOR][COLOR=#E0E0E0]/pay[/COLOR][COLOR=#AAAAAA] (default: [B]2.0%[/B]). Collected to the [/COLOR][COLOR=#E0E0E0]treasury-account[/COLOR][COLOR=#AAAAAA].[/COLOR]
+[*][B][COLOR=#FFD700]Exchange Tax:[/COLOR][/B] [COLOR=#AAAAAA]A percentage tax on currency conversions via [/COLOR][COLOR=#E0E0E0]/exchange[/COLOR][COLOR=#AAAAAA] (default: [B]1.0%[/B]).[/COLOR]
+[*][COLOR=#AAAAAA]All taxes are deposited into the [B]Public Treasury[/B] bank account ([/COLOR][COLOR=#E0E0E0]treasury-account: "public_treasury"[/COLOR][COLOR=#AAAAAA]).[/COLOR]
+[/LIST]
+
+[B][COLOR=#FFFFFF]Wealth Tax:[/COLOR][/B]
+[LIST]
+[*][COLOR=#AAAAAA]Players exceeding a configurable balance threshold ([/COLOR][COLOR=#E0E0E0]threshold[/COLOR][COLOR=#AAAAAA], default: [B]1,000,000[/B]) pay a periodic wealth tax on their excess balance (default: [B]0.05%[/B] per interval).[/COLOR]
+[/LIST]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]💼  9.  LOANS & CREDIT SYSTEM[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[COLOR=#AAAAAA]Players can take out bank loans via the [/COLOR][COLOR=#E0E0E0]/loan[/COLOR][COLOR=#AAAAAA] command (alias: [/COLOR][COLOR=#E0E0E0]/loans[/COLOR][COLOR=#AAAAAA]). The loan system handles billing automatically.[/COLOR]
+
+[LIST]
+[*][B][COLOR=#FFD700]Base Interest Rate:[/COLOR][/B] [COLOR=#AAAAAA]Configurable loan interest rate ([/COLOR][COLOR=#E0E0E0]loans.interest-rate-percent[/COLOR][COLOR=#AAAAAA], default: [B]5.0%[/B]).[/COLOR]
+[*][B][COLOR=#FFD700]Billing Interval:[/COLOR][/B] [COLOR=#AAAAAA]Installments are collected automatically every [/COLOR][COLOR=#E0E0E0]billing-interval-minutes[/COLOR][COLOR=#AAAAAA] (default: [B]60 min[/B]).[/COLOR]
+[/LIST]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]💰  10.  PAYDAYS (SALARIES)[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[COLOR=#AAAAAA]VaultX can automatically distribute periodic salaries to players based on their LuckPerms / Vault permission group.[/COLOR]
+
+[LIST]
+[*][B][COLOR=#FFD700]Payout Interval:[/COLOR][/B] [COLOR=#AAAAAA]Salaries are paid every [/COLOR][COLOR=#E0E0E0]paydays.interval-minutes[/COLOR][COLOR=#AAAAAA] (default: [B]60 min[/B]).[/COLOR]
+[*][B][COLOR=#FFD700]Group Salaries:[/COLOR][/B] [COLOR=#AAAAAA]Salary amounts are configured per group (e.g. [/COLOR][COLOR=#E0E0E0]default: 50.0[/COLOR][COLOR=#AAAAAA], [/COLOR][COLOR=#E0E0E0]vip: 500.0[/COLOR][COLOR=#AAAAAA], [/COLOR][COLOR=#E0E0E0]mvp: 1000.0[/COLOR][COLOR=#AAAAAA]).[/COLOR]
+[*][B][COLOR=#FFD700]Salary Tax:[/COLOR][/B] [COLOR=#AAAAAA]A configurable percentage tax is automatically deducted from payouts and deposited into the treasury (default: [B]10.0%[/B]).[/COLOR]
+[*][COLOR=#AAAAAA]Players can check their next payout countdown via the [/COLOR][COLOR=#E0E0E0]/payday[/COLOR][COLOR=#AAAAAA] command (alias: [/COLOR][COLOR=#E0E0E0]/salary[/COLOR][COLOR=#AAAAAA]).[/COLOR]
+[/LIST]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]📈  11.  STOCK MARKET[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[COLOR=#AAAAAA]VaultX includes a commodity stock market (Gold, Iron, Emerald, Diamond) with live price fluctuations and random market events. Accessible via [/COLOR][COLOR=#E0E0E0]/stocks[/COLOR][COLOR=#AAAAAA] (alias: [/COLOR][COLOR=#E0E0E0]/stockmarket[/COLOR][COLOR=#AAAAAA]).[/COLOR]
+
+[LIST]
+[*][B][COLOR=#FFD700]Price Fluctuations:[/COLOR][/B] [COLOR=#AAAAAA]Commodity prices update every [/COLOR][COLOR=#E0E0E0]fluctuation-interval-minutes[/COLOR][COLOR=#AAAAAA] (default: [B]5 min[/B]) with a maximum swing of [/COLOR][COLOR=#E0E0E0]max-fluctuation-percent[/COLOR][COLOR=#AAAAAA] (default: [B]±3.0%[/B] random walk).[/COLOR]
+[*][B][COLOR=#FFD700]Market News Events:[/COLOR][/B] [COLOR=#AAAAAA]Random events (crisis, boom, shortage) can fire at each interval with a configurable [/COLOR][COLOR=#E0E0E0]event-chance-percent[/COLOR][COLOR=#AAAAAA] (default: [B]15.0%[/B]).[/COLOR]
+[*][B][COLOR=#FFD700]Dividends:[/COLOR][/B] [COLOR=#AAAAAA]Bank shareholders receive dividend payouts from a percentage of the bank balance ([/COLOR][COLOR=#E0E0E0]dividends.pool-percent[/COLOR][COLOR=#AAAAAA], default: [B]1.0%[/B]) every [/COLOR][COLOR=#E0E0E0]payout-interval-minutes[/COLOR][COLOR=#AAAAAA] (default: [B]60 min[/B]).[/COLOR]
+[/LIST]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]🔄  12.  RECURRING PAYMENTS & SUBSCRIPTIONS[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[COLOR=#AAAAAA]Players can create and manage recurring automatic payments (e.g. rent, subscriptions) via the [/COLOR][COLOR=#E0E0E0]/subscribe[/COLOR][COLOR=#AAAAAA] command (alias: [/COLOR][COLOR=#E0E0E0]/subscriptions[/COLOR][COLOR=#AAAAAA]).[/COLOR]
+
+[LIST]
+[*][B][COLOR=#FFD700]Max Active Subscriptions:[/COLOR][/B] [COLOR=#AAAAAA]Configurable per player ([/COLOR][COLOR=#E0E0E0]subscriptions.max-active-per-player[/COLOR][COLOR=#AAAAAA], default: [B]10[/B]). Set to [/COLOR][COLOR=#E0E0E0]-1[/COLOR][COLOR=#AAAAAA] for unlimited.[/COLOR]
+[*][B][COLOR=#FFD700]Scheduler Interval:[/COLOR][/B] [COLOR=#AAAAAA]The scheduler checks for due payments every [/COLOR][COLOR=#E0E0E0]check-interval-minutes[/COLOR][COLOR=#AAAAAA] (default: [B]1 min[/B]).[/COLOR]
+[/LIST]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]⚡  13.  UUID CACHE[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[COLOR=#AAAAAA]VaultX includes a high-performance UUID ↔ Name cache to avoid the TPS-killing [/COLOR][COLOR=#E0E0E0]Bukkit.getOfflinePlayer(String)[/COLOR][COLOR=#AAAAAA] call (which can perform a synchronous HTTP request to Mojang's API on certain server versions).[/COLOR]
+
+[LIST]
+[*][B][COLOR=#FFD700]Async Pre-Loading:[/COLOR][/B] [COLOR=#AAAAAA]On startup, all known offline players are loaded into cache asynchronously (configurable via [/COLOR][COLOR=#E0E0E0]advanced.preload-offline-players[/COLOR][COLOR=#AAAAAA]).[/COLOR]
+[*][B][COLOR=#FFD700]Auto-Update on Join:[/COLOR][/B] [COLOR=#AAAAAA]Each player's UUID/Name pair is cached immediately when they connect.[/COLOR]
+[*][B][COLOR=#FFD700]O(1) Resolution:[/COLOR][/B] [COLOR=#AAAAAA]All commands and economy operations use [/COLOR][COLOR=#E0E0E0]UUIDCache.getOfflinePlayerFast()[/COLOR][COLOR=#AAAAAA] before falling back to the Bukkit API.[/COLOR]
+[/LIST]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]🏆  14.  PLACEHOLDERAPI INTEGRATION[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[COLOR=#AAAAAA]VaultX auto-registers a PlaceholderAPI expansion (identifier: [B]vaultx[/B]) if PlaceholderAPI is installed.[/COLOR]
+
+[SIZE=3] [/SIZE]
+
+[B][COLOR=#FFFFFF]Balance Placeholders:[/COLOR][/B]
+[TABLE]
+[TR]
+[TD][B][COLOR=#FFD700]%vaultx_balance_default%[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Raw balance in the default currency (2 decimals)[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]%vaultx_balance_Gems%[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Raw balance in the Gems currency[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]%vaultx_balance_formatted_default%[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Formatted balance using the economy plugin's format() method (e.g. "$1,250.00")[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]%vaultx_balance_formatted_Gems%[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Formatted balance in the Gems currency[/COLOR][/TD]
+[/TR]
+[/TABLE]
+[COLOR=#AAAAAA]Replace [B]default[/B] or [B]Gems[/B] with any currency name configured in your [/COLOR][COLOR=#E0E0E0]config.yml[/COLOR][COLOR=#AAAAAA].[/COLOR]
+
+[SIZE=3] [/SIZE]
+
+[B][COLOR=#FFFFFF]Leaderboard Placeholders:[/COLOR][/B]
+[TABLE]
+[TR]
+[TD][B][COLOR=#FFD700]%vaultx_top_name_<position>_<currency>%[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Player name at position N (e.g. [I]%vaultx_top_name_1_default%[/I])[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]%vaultx_top_balance_<position>_<currency>%[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Raw balance at position N[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]%vaultx_top_balance_formatted_<position>_<currency>%[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Formatted balance at position N[/COLOR][/TD]
+[/TR]
+[/TABLE]
+[COLOR=#AAAAAA]Leaderboard placeholders require [B]Redis[/B] to be enabled. Replace [B]<position>[/B] with 1–100 and [B]<currency>[/B] with the currency key (e.g. [I]default[/I], [I]gems[/I]). The leaderboard cache refreshes every [/COLOR][COLOR=#E0E0E0]advanced.global-rich-list.update-interval-minutes[/COLOR][COLOR=#AAAAAA] (default: [B]5 min[/B]) and tracks up to [/COLOR][COLOR=#E0E0E0]max-tracked-players[/COLOR][COLOR=#AAAAAA] (default: [B]100[/B]).[/COLOR]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]📊  15.  DEVELOPER API[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[B][COLOR=#FFFFFF]0. Add VaultX-API Dependency to Your Project:[/COLOR][/B]
+[COLOR=#AAAAAA]To access VaultX-specific features (Async API, Multi-Currency, Events), add [B]VaultX-API[/B] to your build tool:[/COLOR]
+
+[B][COLOR=#FFD700]Maven (pom.xml):[/COLOR][/B]
+[CODE=xml]
+<dependency>
+    <groupId>fr.skynex.vaultx</groupId>
+    <artifactId>VaultX-API</artifactId>
+    <version>1.1.1</version>
+    <scope>provided</scope>
+</dependency>
+[/CODE]
+
+[B][COLOR=#FFD700]Gradle (build.gradle):[/COLOR][/B]
+[CODE=groovy]
+compileOnly 'fr.skynex.vaultx:VaultX-API:1.1.1'
+[/CODE]
+
+[B][COLOR=#FFFFFF]1. Listen to Transactions Asynchronously:[/COLOR][/B]
+[COLOR=#AAAAAA]VaultX fires a [B]VaultTransactionEvent[/B] asynchronously on every deposit and withdrawal, allowing other plugins to audit or react to economy behavior with zero performance penalty.[/COLOR]
+
+[CODE=java]
+import net.milkbowl.vault.economy.events.VaultTransactionEvent;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+
+public class MyEconomyAuditor implements Listener {
+
+    @EventHandler
+    public void onVaultTransaction(VaultTransactionEvent event) {
+        String type = event.getType().name(); // DEPOSIT or WITHDRAW
+        String player = event.getPlayerName();
+        double amount = event.getAmount();
+        // The package/plugin namespace that triggered the transaction (e.g. "fr.skynex")
+        String callerPlugin = event.getCallerPlugin();
+
+        System.out.println("[Audit] " + type + " of $" + amount + " for " + player + " by " + callerPlugin);
+    }
+}
+[/CODE]
+
+[B][COLOR=#FFFFFF]2. Async Economy API (Non-blocking):[/COLOR][/B]
+[COLOR=#AAAAAA]VaultX exposes async wrappers for all core economy operations via the [B]VaultAsyncEconomy[/B] interface without blocking the main server thread:[/COLOR]
+[CODE=java]
+import net.milkbowl.vault.economy.VaultAsyncEconomy;
+
+if (vaultEcon instanceof VaultAsyncEconomy) {
+    VaultAsyncEconomy asyncEcon = (VaultAsyncEconomy) vaultEcon;
+
+    asyncEcon.getBalanceAsync(player).thenAccept(balance -> {
+        System.out.println("Balance: " + balance);
+    });
+
+    asyncEcon.depositPlayerAsync(player, 1000.0).thenAccept(response -> {
+        if (response.transactionSuccess()) {
+            System.out.println("Deposit OK! New balance: " + response.balance);
+        }
+    });
+}
+[/CODE]
+
+[B][COLOR=#FFFFFF]3. Multi-Currency API:[/COLOR][/B]
+[COLOR=#AAAAAA]Interact with custom currencies like Gems or Tokens defined in VaultX by casting the economy service to [B]MultiCurrencyEconomy[/B]:[/COLOR]
+[CODE=java]
+import net.milkbowl.vault.economy.MultiCurrencyEconomy;
+
+if (vaultEcon instanceof MultiCurrencyEconomy) {
+    MultiCurrencyEconomy multiEcon = (MultiCurrencyEconomy) vaultEcon;
+
+    // Get balance of a custom currency
+    double gemsBalance = multiEcon.getCurrencyBalance(player, "gems");
+
+    // Deposit custom currency
+    multiEcon.depositCurrencyPlayer(player, "gems", 100.0);
+}
+[/CODE]
+
+[B][COLOR=#FFFFFF]4. Integration Settings:[/COLOR][/B]
+[COLOR=#AAAAAA]Ensure you load after Vault by adding it as a dependency in your [B]plugin.yml[/B]:[/COLOR]
+[CODE=yaml]
+depend: [Vault]
+[/CODE]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]🛠️  16.  COMMANDS[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[COLOR=#AAAAAA]All commands support [B]Tab Completion[/B] for player names, currencies, and page numbers. Command names and aliases are fully customisable in [/COLOR][COLOR=#E0E0E0]config.yml[/COLOR][COLOR=#AAAAAA] under [/COLOR][COLOR=#E0E0E0]commands:[/COLOR][COLOR=#AAAAAA].[/COLOR]
+
+[SIZE=3] [/SIZE]
+
+[B][COLOR=#FFFFFF]Player Commands:[/COLOR][/B]
+[TABLE]
+[TR]
+[TD][B][COLOR=#888888]Command[/COLOR][/B][/TD]
+[TD][B][COLOR=#888888]Aliases[/COLOR][/B][/TD]
+[TD][B][COLOR=#888888]Description[/COLOR][/B][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/money [player][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]/balance, /bal[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Check your own or another player's balance.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/pay [player] [amount] [currency][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]—[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Transfer money to another player. Supports multi-currency with automatic rollback on failure.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/baltop [currency] [page][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]/moneytop[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]View global wealth leaderboard. Requires Redis.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/transactions [page][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]/tx, /history[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]View your paginated transaction history from the local database.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/exchange [amount] [from] [to][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]/forex, /convert[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Convert between currencies at the current dynamic exchange rate.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/bank [subcommand][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]/sharedbank[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Manage shared bank accounts.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/loan [subcommand][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]/loans[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Interact with the loan and debt system.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/escrow start [receiver] [amount] [currency][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]—[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Lock funds for a secure cross-player trade.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/escrow release [id][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]—[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Confirm delivery and release locked funds to receiver.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/escrow refund [id][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]—[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Cancel escrow and refund funds to sender.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/escrow list[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]—[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]List your active escrow transactions.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/stocks[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]/stockmarket[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Access the commodity stock market.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/check [subcommand][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]/cheque[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Create and redeem physical economic checks.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/payday[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]/salary[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Display details and countdown for your next salary payout.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/mailbox[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]/mail[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Manage your offline transaction mailbox.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/subscribe [subcommand][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]/subscriptions[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Manage recurring payments and subscriptions.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/vaultx balance [player] [currency][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]/vx bal[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Check balance in any currency via the VaultX main command.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/vaultx menu[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]/vx gui[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Open the interactive dashboard GUI.[/COLOR][/TD]
+[/TR]
+[/TABLE]
+
+[SIZE=3] [/SIZE]
+
+[B][COLOR=#FFFFFF]Admin Commands ([/COLOR][COLOR=#FFD700]vault.admin[/COLOR][COLOR=#FFFFFF] required):[/COLOR][/B]
+[TABLE]
+[TR]
+[TD][B][COLOR=#888888]Command[/COLOR][/B][/TD]
+[TD][B][COLOR=#888888]Description[/COLOR][/B][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/eco give [player] [amount] [currency][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Add funds to a player's account in any supported currency.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/eco take [player] [amount] [currency][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Deduct funds from a player's account.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/eco set [player] [amount] [currency][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Set a player's balance to an exact value.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/eco admin freeze [player] [reason][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Freeze a player's account. All transactions blocked. Synced via Redis. Triggers a Discord alert.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/eco admin unfreeze [player][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Unfreeze a player's account. Synced via Redis. Triggers a Discord alert.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/eco admin audit [player/all] [page][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]View paginated security audit logs. Use "all" for all events or specify a player name to filter.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/eco admin stats[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]View real-time telemetry: Cache Hit Rate, DB Write Latency, Redis Status, Currency Supply.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/eco admin report [days][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Generate an inflation report over the last N days, categorized by source (SHOP, QUEST, ADMIN, JOB).[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/eco admin tax set <type> <percent>[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Dynamically modify tax rates (payday, pay, or exchange) in real-time.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/eco admin treasury[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Display the state finances of the Public Treasury (balance, account, tax rates).[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/eco admin subvention <bank> <amount>[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Grant a public subvention from the Treasury to a shared bank account.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/eco admin bank delete <name>[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Force delete any shared bank account administratively.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/eco admin bank addmember <name> <player> <role>[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Add a player to a bank account with a specific role (OWNER, MANAGER, MEMBER, VIEWER).[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/eco admin bank removemember <name> <player>[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Remove a member from any shared bank account.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/vaultx logs <player> [page][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]View the detailed transaction history log for any player (admin only).[/COLOR][/TD]
+[/TR]
+[/TABLE]
+
+[SIZE=3] [/SIZE]
+
+[B][COLOR=#FFFFFF]Legacy Commands:[/COLOR][/B]
+[TABLE]
+[TR]
+[TD][B][COLOR=#FFD700]/vault-info[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Display active Economy, Permission, and Chat providers registered on the server.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]/vault-convert [econ1] [econ2][/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Asynchronously migrate all player balances from one economy provider to another. Requires 2 economies loaded.[/COLOR][/TD]
+[/TR]
+[/TABLE]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]🔐  17.  PERMISSIONS[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[TABLE]
+[TR]
+[TD][B][COLOR=#888888]Permission[/COLOR][/B][/TD]
+[TD][B][COLOR=#888888]Default[/COLOR][/B][/TD]
+[TD][B][COLOR=#888888]Description[/COLOR][/B][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]vault.admin[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]OP only[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Full access to all admin commands: [/COLOR][COLOR=#E0E0E0]/vault-info[/COLOR][COLOR=#AAAAAA], [/COLOR][COLOR=#E0E0E0]/vault-convert[/COLOR][COLOR=#AAAAAA], [/COLOR][COLOR=#E0E0E0]/eco[/COLOR][COLOR=#AAAAAA] (give, take, set, freeze, unfreeze, audit, stats, report).[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]vault.top[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]All players[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Allows players to check the wealth leaderboard ([/COLOR][COLOR=#E0E0E0]/baltop[/COLOR][COLOR=#AAAAAA]).[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]vault.convert[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]All players[/COLOR][/TD>
+[TD][COLOR=#AAAAAA]Allows players to convert currencies via [/COLOR][COLOR=#E0E0E0]/exchange[/COLOR][COLOR=#AAAAAA].[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]vault.command.money[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]All players[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Access to the [/COLOR][COLOR=#E0E0E0]/money[/COLOR][COLOR=#AAAAAA] command.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]vault.command.pay[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]All players[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Access to the [/COLOR][COLOR=#E0E0E0]/pay[/COLOR][COLOR=#AAAAAA] command.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]vault.command.bank[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]All players[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Access to the [/COLOR][COLOR=#E0E0E0]/bank[/COLOR][COLOR=#AAAAAA] command.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]vault.command.loan[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]All players[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Access to the [/COLOR][COLOR=#E0E0E0]/loan[/COLOR][COLOR=#AAAAAA] command.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]vault.command.escrow[/COLOR][/B][/TD>
+[TD][COLOR=#AAAAAA]All players[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Access to the [/COLOR][COLOR=#E0E0E0]/escrow[/COLOR][COLOR=#AAAAAA] command.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]vault.command.stocks[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]All players[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Access to the [/COLOR][COLOR=#E0E0E0]/stocks[/COLOR][COLOR=#AAAAAA] command.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]vault.command.check[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]All players[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Access to the [/COLOR][COLOR=#E0E0E0]/check[/COLOR][COLOR=#AAAAAA] command.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]vault.command.payday[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]All players[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Access to the [/COLOR][COLOR=#E0E0E0]/payday[/COLOR][COLOR=#AAAAAA] command.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]vault.command.mailbox[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]All players[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Access to the [/COLOR][COLOR=#E0E0E0]/mailbox[/COLOR][COLOR=#AAAAAA] command.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]vault.command.transactions[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]All players[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Access to the [/COLOR][COLOR=#E0E0E0]/transactions[/COLOR][COLOR=#AAAAAA] command.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]vault.command.subscribe[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]All players[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Access to the [/COLOR][COLOR=#E0E0E0]/subscribe[/COLOR][COLOR=#AAAAAA] command.[/COLOR][/TD]
+[/TR]
+[/TABLE]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]🗂️  18.  CONFIGURATION REFERENCE (config.yml)[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[CODE=yaml]
+# =======================================================
+# VaultX - Configuration
+# =======================================================
+
+economy:
+  use-cache: true           # Enable O(1) in-memory balance cache (recommended)
+  cache-ttl-ms: 1000        # Cache TTL for online players (milliseconds)
+  debug-transactions: false # Log every transaction to console (debugging only)
+
+redis:
+  enabled: true
+  host: "127.0.0.1"
+  port: 6379
+  password: ""
+  server-id: "server-1"             # Unique ID for this server in the network
+  channel: "vaultx:economy:sync"   # Pub/Sub channel name
+  max-connections: 16               # Jedis pool size
+  connection-timeout-ms: 2000
+  heartbeat-interval-seconds: 5
+
+metrics:
+  enabled: true             # Enable anonymous bStats metrics
+
+security:
+  rate-limiter:
+    enabled: true
+    max-transactions-per-second: 20
+    cooldown-seconds: 5
+  firewall:
+    enabled: true
+    max-single-transaction: 10000000.0
+    auto-freeze: true
+    large-transaction-threshold: 500000.0  # Alert threshold (allowed but flagged)
+    spike-detection:
+      enabled: true
+      factor: 5.0
+      time-window-seconds: 60
+      minimum-threshold: 10000.0
+    discord-webhook:
+      enabled: false
+      url: "YOUR_DISCORD_WEBHOOK_URL_HERE"
+    inflation-alert:
+      enabled: true
+      threshold-percent: 5.0
+
+storage:
+  type: "sqlite"            # sqlite, mysql, or mariadb
+  transaction-history-retention-days: 30
+  mysql:
+    host: "127.0.0.1"
+    port: 3306
+    database: "vaultx"
+    username: "root"
+    password: ""
+    properties: "?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
+
+banks:
+  native-redis:
+    enabled: true
+  backup:
+    enabled: true
+    interval-minutes: 30
+
+advanced:
+  global-uuid-cache: true
+  preload-offline-players: true
+  global-rich-list:
+    update-interval-minutes: 5
+    max-tracked-players: 100
+
+currency-exchange:
+  auto-convert: true
+  rates:
+    Gems: 1000.0            # 1 Gem = 1000 default coins
+    Tokens: 10.0            # 1 Token = 10 default coins
+  symbols:
+    Gems: "&a✦"
+    Tokens: "&b✪"
+  dynamic-rates:
+    enabled: true
+    update-interval-minutes: 15
+    max-fluctuation-percent: 3.5
+    demand-factor: 0.001
+    market-events:
+      enabled: true
+      chance-percent: 10.0
+
+central-bank:
+  interest:
+    enabled: true
+    interval-minutes: 60
+    rates:
+      default: 0.05         # +0.05% per hour
+      gems: 0.1             # +0.10% per hour
+      tokens: 0.02          # +0.02% per hour
+    bank-bonus-percent: 0.01
+  taxes:
+    enabled: true
+    pay-tax-percent: 2.0
+    exchange-tax-percent: 1.0
+    treasury-account: "public_treasury"
+  wealth-tax:
+    enabled: true
+    threshold: 1000000.0
+    tax-percent: 0.05
+
+loans:
+  interest-rate-percent: 5.0
+  billing-interval-minutes: 60
+
+paydays:
+  enabled: true
+  interval-minutes: 60
+  groups:
+    default: 50.0
+    vip: 500.0
+    mvp: 1000.0
+  tax:
+    enabled: true
+    percent: 10.0
+
+stocks:
+  enabled: true
+  fluctuation-interval-minutes: 5
+  max-fluctuation-percent: 3.0
+  event-chance-percent: 15.0
+  dividends:
+    payout-interval-minutes: 60
+    pool-percent: 1.0
+
+subscriptions:
+  enabled: true
+  max-active-per-player: 10
+  check-interval-minutes: 1
+
+commands:
+  money:
+    enabled: true
+    name: "money"
+    permission: "vault.command.money"
+    aliases: [balance, bal]
+  pay:
+    enabled: true
+    name: "pay"
+    permission: "vault.command.pay"
+  baltop:
+    enabled: true
+    name: "baltop"
+    permission: "vault.top"
+    aliases: [moneytop]
+  # ... (see config.yml for all command overrides)
+
+settings:
+  check-updates: true
+[/CODE]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]📁  19.  GENERATED FILES[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[COLOR=#AAAAAA]VaultX automatically creates the following files in [B]/plugins/Vault/[/B]. Note that [/COLOR][COLOR=#E0E0E0]failover.db[/COLOR][COLOR=#AAAAAA] is only created when using SQLite storage.[/COLOR]
+
+[TABLE]
+[TR]
+[TD][B][COLOR=#FFFFFF]config.yml[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Main plugin configuration file. Auto-generated with full defaults on first launch.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFFFFF]failover.db[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]SQLite database: custom currency balances, pending sync queue, bank balances, security audit logs. [I](SQLite mode only)[/I][/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFFFFF]frozen_players.yml[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Persists the list of frozen player UUIDs across server restarts.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFFFFF]banks_backup.yml[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Periodic YAML backup of all bank balances. Used to restore banks if Redis is offline at startup. [I](When bank backup is enabled)[/I][/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFFFFF]security_audit.log[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Plain-text append log of all security events with timestamps.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFFFFF]gui.yml[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Configuration file for the interactive GUI dashboard and menus.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFFFFF]messages.yml[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Localisation and translation configuration file for chat messages.[/COLOR][/TD]
+[/TR]
+[/TABLE]
+
+[SIZE=3] [/SIZE]
+
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[CENTER][SIZE=5][B][COLOR=#FFD700]🔗  20.  SOFT DEPENDENCIES[/COLOR][/B][/SIZE][/CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+
+[TABLE]
+[TR]
+[TD][B][COLOR=#888888]Dependency[/COLOR][/B][/TD]
+[TD][B][COLOR=#888888]Required?[/COLOR][/B][/TD]
+[TD][B][COLOR=#888888]Purpose[/COLOR][/B][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]Any Economy Plugin[/COLOR][/B][/TD]
+[TD][COLOR=#5EFF8A]Required[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]VaultX is a wrapper — it needs an underlying economy provider (EssentialsX, CMI, etc.) to intercept.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]PlaceholderAPI[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Optional[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Auto-registers the [/COLOR][COLOR=#E0E0E0]%vaultx_*%[/COLOR][COLOR=#AAAAAA] placeholder expansion when detected.[/COLOR][/TD]
+[/TR]
+[TR]
+[TD][B][COLOR=#FFD700]Redis (Jedis)[/COLOR][/B][/TD]
+[TD][COLOR=#AAAAAA]Optional[/COLOR][/TD]
+[TD][COLOR=#AAAAAA]Required for cross-server synchronization, leaderboard, escrow, and distributed locks.[/COLOR][/TD]
+[/TR]
+[/TABLE]
+
+[SIZE=3] [/SIZE]
+
+[CENTER]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[SIZE=3][COLOR=#AAAAAA]Questions? Bug reports? Come chat with us on Discord.[/COLOR][/SIZE]
+[COLOR=#FFD700]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/COLOR]
+[SIZE=3] [/SIZE]
+[URL='https://discord.gg/ycxRfd44fm'][IMG]https://image.noelshack.com/fichiers/2026/19/2/1778002404-universal-banner-edited-final-177800224786112.png[/IMG][/URL]
+[SIZE=3] [/SIZE]
+[SIZE=2][COLOR=#444444]VaultX is not affiliated with the original Vault project. All plugin names mentioned are trademarks of their respective owners.[/COLOR][/SIZE]
+[/CENTER]
