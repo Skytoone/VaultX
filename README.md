@@ -40,7 +40,7 @@ repositories {
 }
 
 dependencies {
-    compileOnly 'com.github.Skynex:VaultX-API:1.1.1'
+    compileOnly 'com.github.Skynex:VaultX-API:1.1.2'
 }
 ```
 
@@ -239,6 +239,70 @@ public class PluginUnitTest {
         
         // Run tests directly in JUnit without launching Spigot!
         mockEcon.withdrawPlayer("PlayerName", 50.0);
+    }
+}
+```
+
+### 9. Real-Time Currency Exchange API (`CurrencyExchangeAPI`)
+
+```java
+import net.milkbowl.vault.util.VaultXHook;
+
+public class ForexSystem {
+
+    public double convertGemsToDollars(double gemsAmount) {
+        return VaultXHook.getExchangeAPI()
+            .map(api -> api.convert("gems", "dollars", gemsAmount))
+            .orElse(gemsAmount);
+    }
+}
+```
+
+### 10. Recurring Subscriptions & Taxes (`VaultSubscriptionAPI`)
+
+```java
+import net.milkbowl.vault.util.VaultXHook;
+import org.bukkit.entity.Player;
+
+public class TownyTaxSystem {
+
+    public void registerPlotTax(Player player, String plotId, double taxAmount) {
+        VaultXHook.getSubscriptionAPI().ifPresent(api -> {
+            // Deduct $50 every 7 days (604,800,000 ms)
+            api.registerSubscriptionAsync(player, "tax_" + plotId, "dollars", taxAmount, 604800000L);
+        });
+    }
+}
+```
+
+### 11. Offline Player Payouts (`VaultMailboxAPI`)
+
+```java
+import net.milkbowl.vault.util.VaultXHook;
+import java.util.UUID;
+
+public class AuctionHousePayout {
+
+    public void rewardOfflineSeller(UUID sellerUuid, double profit) {
+        VaultXHook.getMailboxAPI().ifPresent(api -> {
+            api.sendOfflinePaymentAsync(sellerUuid, "dollars", profit, "Auction House Sale #512");
+        });
+    }
+}
+```
+
+### 12. Payout Boosters & Event Multipliers (`VaultBoosterAPI`)
+
+```java
+import net.milkbowl.vault.util.VaultXHook;
+
+public class EventManager {
+
+    public void startDoubleGemsEvent() {
+        VaultXHook.getBoosterAPI().ifPresent(api -> {
+            // Activate 2.0x multiplier for gems for 2 hours (7,200,000 ms)
+            api.registerGlobalBooster("gems", 2.0, 7200000L);
+        });
     }
 }
 ```
