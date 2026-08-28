@@ -1,15 +1,5 @@
 # ⚡ VaultX & VaultX-API
 
-[![Version](https://img.shields.io/badge/Version-1.1.2-gold.svg)](https://github.com/Skytoone/VaultX)
-[![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://www.oracle.com/java/)
-[![Platform](https://img.shields.io/badge/Platform-Paper%20%7C%20Spigot%20%7C%20Folia-blue.svg)](https://papermc.io/)
-[![Memory Safety](https://img.shields.io/badge/Memory%20Safety-Leak%20Free-brightgreen.svg)](https://github.com/Skytoone/VaultX)
-[![License](https://img.shields.io/badge/License-GPLv3-green.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
-
-**VaultX** is an enterprise-grade, high-performance economy implementation and API extension for Minecraft Spigot / Paper / Folia servers. It extends the legacy Vault API with **native multi-currency**, **async virtual threads**, **physical bank checks**, **loans & credit scoring**, **inflation control**, **crypto wallets**, and **zero-latency memory caching**.
-
----
-
 ## 🌟 Core Features
 
 - **⚡ Virtual Threading & O(1) Memory Caching**: Zero main-thread blocking, powered by Java 21 Virtual Threads and instant RAM cache.
