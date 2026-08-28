@@ -199,6 +199,65 @@ public class CombatLoggerProtection implements Listener {
 }
 ```
 
+### 7. Anti-Duplication Thread-Safe Lock (`VaultLockAPI`)
+
+```java
+import net.milkbowl.vault.util.VaultXHook;
+import org.bukkit.entity.Player;
+
+public class CasinoGame {
+
+    public void spinRoulette(Player player, double betAmount) {
+        VaultXHook.getLockAPI().ifPresent(lock -> {
+            lock.executeWithLock(player, () -> {
+                // Guaranteed 100% thread-safe against click spam duplication
+                VaultXHook.getMultiCurrencyEconomy().ifPresent(econ -> {
+                    if (econ.has(player, betAmount)) {
+                        econ.withdrawPlayer(player, betAmount);
+                        // Process roulette outcome safely...
+                    }
+                });
+            });
+        });
+    }
+}
+```
+
+### 8. Unit Testing Without Spigot Server (`VaultXTestKit`)
+
+```java
+import net.milkbowl.vault.economy.MultiCurrencyEconomy;
+import net.milkbowl.vault.util.VaultXTestKit;
+import org.junit.jupiter.api.Test;
+
+public class PluginUnitTest {
+
+    @Test
+    public void testShopPurchase() {
+        // Mock economy with $1000 starting balance
+        MultiCurrencyEconomy mockEcon = VaultXTestKit.createMockEconomy(1000.0);
+        
+        // Run tests directly in JUnit without launching Spigot!
+        mockEcon.withdrawPlayer("PlayerName", 50.0);
+    }
+}
+```
+
+---
+
+## 🔌 PlaceholderAPI Placeholders
+
+VaultX automatically registers official Placeholders when `PlaceholderAPI` is installed:
+
+| Placeholder | Description | Example Output |
+| :--- | :--- | :--- |
+| `%vaultx_balance%` | Default currency balance | `1500.50` |
+| `%vaultx_balance_<currency>%` | Custom currency balance | `50.00` |
+| `%vaultx_balance_formatted_<currency>%` | Formatted balance with symbol | `1,500.50 💎` |
+| `%vaultx_symbol_<currency>%` | Configured currency symbol | `💎`, `🪙`, `$` |
+| `%vaultx_multiplier_<currency>%` | Active event multiplier | `2.00` |
+
+
 ---
 
 ## 🛠️ Building from Source
