@@ -11,6 +11,9 @@ import net.milkbowl.vault.economy.VaultFormatAPI;
 import net.milkbowl.vault.economy.VaultMailboxAPI;
 import net.milkbowl.vault.economy.VaultBoosterAPI;
 
+import net.milkbowl.vault.economy.VaultLockAPI;
+import net.milkbowl.vault.economy.VaultSubscriptionAPI;
+
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import java.util.Optional;
@@ -89,6 +92,22 @@ public final class VaultXHook {
      */
     public static Optional<VaultBoosterAPI> getBoosterAPI() {
         RegisteredServiceProvider<VaultBoosterAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultBoosterAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultLockAPI service provider if available.
+     */
+    public static Optional<VaultLockAPI> getLockAPI() {
+        RegisteredServiceProvider<VaultLockAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultLockAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultSubscriptionAPI service provider if available.
+     */
+    public static Optional<VaultSubscriptionAPI> getSubscriptionAPI() {
+        RegisteredServiceProvider<VaultSubscriptionAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultSubscriptionAPI.class);
         return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
     }
 }

@@ -22,7 +22,7 @@ import net.milkbowl.vault.redis.VaultRedisManager;
  * Redis cross-server synchronization, and Multi-Currency support.
  */
 @SuppressWarnings("deprecation")
-public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy, VaultLeaderboardAPI, VaultBatchTransactionAPI, VaultFormatAPI, VaultMailboxAPI, VaultBoosterAPI {
+public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy, VaultLeaderboardAPI, VaultBatchTransactionAPI, VaultFormatAPI, VaultMailboxAPI, VaultBoosterAPI, VaultLockAPI, VaultSubscriptionAPI {
 
     private final Economy delegate;
     private final boolean useCache;
@@ -78,6 +78,10 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     // Booster cache
     private final Map<String, Double> globalBoosters = new ConcurrentHashMap<>();
     private final Map<String, Long> globalBoosterExpirations = new ConcurrentHashMap<>();
+
+    // Lock and Subscription cache
+    private final Map<UUID, java.util.concurrent.locks.ReentrantLock> playerLocks = new ConcurrentHashMap<>();
+    private final Map<String, SubscriptionDetails> activeSubscriptions = new ConcurrentHashMap<>();
  
     private final org.bukkit.scheduler.BukkitTask cleanupTask;
 
@@ -1459,6 +1463,50 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     @Override
     public double calculateBoostedAmount(OfflinePlayer player, String currency, double baseAmount) {
         return baseAmount * getGlobalMultiplier(currency);
+    }
+
+    /* --- LOCK & SUBSCRIPTION API --- */
+
+    @Override
+    public void executeWithLock(OfflinePlayer player, Runnable action) {
+        if (player == null || action == null) return;
+        java.util.concurrent.locks.ReentrantLock lock = playerLocks.computeIfAbsent(player.getUniqueId(), k -> new java.util.concurrent.locks.ReentrantLock());
+        lock.lock();
+        try {
+            action.run();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @Override
+    public <T> T computeWithLock(OfflinePlayer player, java.util.function.Supplier<T> supplier) {
+        if (player == null || supplier == null) return null;
+        java.util.concurrent.locks.ReentrantLock lock = playerLocks.computeIfAbsent(player.getUniqueId(), k -> new java.util.concurrent.locks.ReentrantLock());
+        lock.lock();
+        try {
+            return supplier.get();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Boolean> registerSubscriptionAsync(OfflinePlayer player, String subscriptionId, String currency, double amount, long intervalMs) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (player == null || subscriptionId == null || amount <= 0 || intervalMs <= 0) return false;
+            SubscriptionDetails sub = new SubscriptionDetails(subscriptionId, player.getUniqueId(), currency == null ? "default" : currency, amount, intervalMs, System.currentTimeMillis() + intervalMs);
+            activeSubscriptions.put(subscriptionId, sub);
+            return true;
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Boolean> cancelSubscriptionAsync(String subscriptionId) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (subscriptionId == null) return false;
+            return activeSubscriptions.remove(subscriptionId) != null;
+        }, asyncExecutor);
     }
 
     private long getEffectiveTtl() {

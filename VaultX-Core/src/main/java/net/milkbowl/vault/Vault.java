@@ -329,6 +329,18 @@ public class Vault extends JavaPlugin {
             sm.register(net.milkbowl.vault.economy.VaultFormatAPI.class, primaryEcon, this, ServicePriority.Normal);
             sm.register(net.milkbowl.vault.economy.VaultMailboxAPI.class, primaryEcon, this, ServicePriority.Normal);
             sm.register(net.milkbowl.vault.economy.VaultBoosterAPI.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultLockAPI.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultSubscriptionAPI.class, primaryEcon, this, ServicePriority.Normal);
+        }
+
+        // Register PlaceholderAPI expansion if present
+        if (getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+            try {
+                new net.milkbowl.vault.integration.VaultXExpansion(this).register();
+                getLogger().info("[VaultX] Successfully registered PlaceholderAPI expansion.");
+            } catch (Throwable e) {
+                getLogger().warning("[VaultX] Could not register PlaceholderAPI expansion: " + e.getMessage());
+            }
         }
         centralBankManager = new net.milkbowl.vault.economy.CentralBankManager(this, exchangeRateManager);
         mailboxManager = new net.milkbowl.vault.economy.MailboxManager(this);
