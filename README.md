@@ -357,6 +357,81 @@ public class SecurityAudit {
 }
 ```
 
+### 16. Escrow Transactions API (`VaultEscrowAPI`)
+
+```java
+import fr.skynex.vaultx.util.VaultXHook;
+import org.bukkit.entity.Player;
+
+public class EscrowTradeExample {
+
+    public void startTradeEscrow(Player seller, Player buyer, double amount) {
+        VaultXHook.getEscrowAPI().ifPresent(api -> {
+            api.startEscrow(buyer, seller, amount, "default", 300).thenAccept(result -> {
+                if (result.success) {
+                    buyer.sendMessage("Escrow created! ID: " + result.escrowId);
+                }
+            });
+        });
+    }
+}
+```
+
+### 17. Security Firewall & Account Freeze API (`VaultFirewallAPI`)
+
+```java
+import fr.skynex.vaultx.util.VaultXHook;
+import org.bukkit.entity.Player;
+
+public class AntiCheatProtection {
+
+    public void freezeSuspiciousAccount(Player player, String reason) {
+        VaultXHook.getFirewallAPI().ifPresent(api -> {
+            if (!api.isFrozen(player)) {
+                api.freezePlayer(player, reason);
+            }
+        });
+    }
+}
+```
+
+### 18. Black Market & Dirty Money API (`VaultBlackMarketAPI`)
+
+```java
+import fr.skynex.vaultx.util.VaultXHook;
+import org.bukkit.entity.Player;
+
+public class IllegalQuests {
+
+    public void rewardDirtyMoney(Player player, double dirtyAmount) {
+        VaultXHook.getBlackMarketAPI().ifPresent(api -> {
+            api.addDirtyMoney(player, dirtyAmount);
+        });
+    }
+}
+```
+
+### 19. Real-Time Stock Market & Commodities API (`VaultStockAPI`)
+
+```java
+import fr.skynex.vaultx.util.VaultXHook;
+import org.bukkit.entity.Player;
+
+public class InvestmentBroker {
+
+    public void buyGoldShares(Player player, double shares) {
+        VaultXHook.getStockAPI().ifPresent(api -> {
+            double currentPrice = api.getCommodityPrice("gold");
+            api.buySharesAsync(player, "gold", shares).thenAccept(success -> {
+                if (success) {
+                    player.sendMessage("Successfully bought " + shares + " gold shares at $" + currentPrice + "/share!");
+                }
+            });
+        });
+    }
+}
+```
+
 ---
 
 ## 🔌 PlaceholderAPI Placeholders
@@ -370,6 +445,10 @@ VaultX automatically registers official Placeholders when `PlaceholderAPI` is in
 | `%vaultx_balance_formatted_<currency>%` | Formatted balance with symbol | `1,500.50 💎` |
 | `%vaultx_symbol_<currency>%` | Configured currency symbol | `💎`, `🪙`, `$` |
 | `%vaultx_multiplier_<currency>%` | Active event multiplier | `2.00` |
+| `%vaultx_top_name_<rank>_<currency>%` | Leaderboard player name at rank (1-10) | `Notch` |
+| `%vaultx_top_balance_<rank>_<currency>%` | Leaderboard balance at rank (1-10) | `1,000,000.00` |
+| `%vaultx_dirty_money%` | Player dirty money balance | `250.00` |
+| `%vaultx_stock_price_<commodity>%` | Real-time stock market price | `105.40` |
 
 
 ---
