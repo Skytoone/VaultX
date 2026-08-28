@@ -432,6 +432,96 @@ public class InvestmentBroker {
 }
 ```
 
+### 20. Physical Bank Checks & Vouchers API (`VaultCheckAPI`)
+
+```java
+import fr.skynex.vaultx.util.VaultXHook;
+import org.bukkit.entity.Player;
+
+public class BankerNPC {
+
+    public void issueCheck(Player player, double amount) {
+        VaultXHook.getCheckAPI().ifPresent(api -> {
+            api.createCheckAsync(player, "dollars", amount).thenAccept(checkItem -> {
+                player.getInventory().addItem(checkItem);
+                player.sendMessage("Here is your physical bank check of $" + amount);
+            });
+        });
+    }
+}
+```
+
+### 21. Loans, Credit Scores & Repayment API (`VaultLoanAPI`)
+
+```java
+import fr.skynex.vaultx.util.VaultXHook;
+import org.bukkit.entity.Player;
+
+public class LoanManager {
+
+    public void evaluateCredit(Player player) {
+        VaultXHook.getLoanAPI().ifPresent(api -> {
+            api.getCreditScoreAsync(player).thenAccept(score -> {
+                player.sendMessage("Your Financial Credit Score is: " + score + "/850");
+                if (score >= 700) {
+                    api.takeLoanAsync(player, "dollars", 10000.0, 7, 5.0);
+                }
+            });
+        });
+    }
+}
+```
+
+### 22. Economy Inflation & Tax Control API (`VaultInflationAPI`)
+
+```java
+import fr.skynex.vaultx.util.VaultXHook;
+
+public class EconomyGovernor {
+
+    public void adjustServerTaxes() {
+        VaultXHook.getInflationAPI().ifPresent(api -> {
+            api.setTransactionTaxRate("dollars", 2.5); // 2.5% transaction tax
+            api.setInflationRate("dollars", 1.05);     // 5% inflation rate
+        });
+    }
+}
+```
+
+### 23. Financial Milestones & Achievements API (`VaultMilestoneAPI`)
+
+```java
+import fr.skynex.vaultx.util.VaultXHook;
+import net.milkbowl.vault.economy.VaultMilestoneAPI.Milestone;
+
+public class MilestoneSystem {
+
+    public void registerMilestones() {
+        VaultXHook.getMilestoneAPI().ifPresent(api -> {
+            api.registerMilestone(new Milestone("billionaire", "Server Billionaire", "dollars", 1000000000.0));
+        });
+    }
+}
+```
+
+### 24. Digital Tokens & Crypto Wallets API (`VaultCryptoAPI`)
+
+```java
+import fr.skynex.vaultx.util.VaultXHook;
+import org.bukkit.entity.Player;
+
+public class CryptoMiner {
+
+    public void rewardMining(Player player, double tokens) {
+        VaultXHook.getCryptoAPI().ifPresent(api -> {
+            api.mineTokensAsync(player, "vaultcoin", tokens).thenAccept(resp -> {
+                player.sendMessage("Mined " + tokens + " VaultCoins!");
+            });
+        });
+    }
+}
+```
+
 ---
 
 ## 🔌 PlaceholderAPI Placeholders
