@@ -1289,11 +1289,18 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             suggestions.add("loan");
             suggestions.add("stocks");
             suggestions.add("subscribe");
+            suggestions.add("check");
+            suggestions.add("crypto");
+            suggestions.add("milestones");
+            suggestions.add("payday");
+            suggestions.add("blackmarket");
+            suggestions.add("discord");
             if (sender.hasPermission("vault.admin")) {
                 suggestions.add("admin");
                 suggestions.add("stats");
                 suggestions.add("metrics");
                 suggestions.add("logs");
+                suggestions.add("dynamicpricing");
             }
             return suggestions.stream()
                     .filter(s -> s.startsWith(args[0].toLowerCase()))
