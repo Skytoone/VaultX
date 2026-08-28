@@ -380,6 +380,7 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         balanceCache.remove(uuid);
         offlineBalanceCache.remove(uuid);
         negativeAccountCache.remove(uuid);
+        playerLocks.remove(uuid);
         rateLimitWindow.remove(uuid);
         rateLimitCount.remove(uuid);
         rateLimitBlock.remove(uuid);
