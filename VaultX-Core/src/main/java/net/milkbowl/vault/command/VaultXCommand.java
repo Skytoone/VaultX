@@ -358,6 +358,19 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 if (!checkPermission(sender, "mailbox", "vault.command.mailbox")) break;
                 handleMailbox(sender, args);
                 break;
+            case "analytics":
+                handleAnalytics(sender, args);
+                break;
+            case "booster":
+            case "boosters":
+                handleBoosterCommand(sender, args);
+                break;
+            case "audit":
+                handleAuditLogCommand(sender, args);
+                break;
+            case "payoffline":
+                handlePayOffline(sender, args);
+                break;
             case "bank":
                 if (!checkPermission(sender, "bank", "vault.command.bank")) break;
                 handleBank(sender, econ, args);
@@ -3691,6 +3704,102 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         player.sendMessage(getMsg("discord.link-code-generated", "§a§l[Discord] §fVotre code de vérification est : §e§l%code% §7(expire dans %expire% minutes).")
                 .replace("%code%", code)
                 .replace("%expire%", String.valueOf(expire)));
+    }
+
+    private void handleAnalytics(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("vault.admin.analytics")) {
+            sender.sendMessage("§cYou do not have permission!");
+            return;
+        }
+        String currency = args.length > 1 ? args[1] : "default";
+        Vault.getAnalyticsAPI().getTotalSupplyAsync(currency).thenAccept(total -> {
+            Vault.getAnalyticsAPI().getAverageBalanceAsync(currency).thenAccept(avg -> {
+                Vault.getAnalyticsAPI().getVolume24hAsync(currency).thenAccept(vol -> {
+                    sender.sendMessage("§8§m--------------------------------------------------");
+                    sender.sendMessage("§e§l📊 VaultX Analytics §7(" + currency.toUpperCase() + ")");
+                    sender.sendMessage("§7• Total Supply: §a$" + String.format("%.2f", total));
+                    sender.sendMessage("§7• Avg Balance: §a$" + String.format("%.2f", avg));
+                    sender.sendMessage("§7• 24h Volume: §a$" + String.format("%.2f", vol));
+                    sender.sendMessage("§8§m--------------------------------------------------");
+                });
+            });
+        });
+    }
+
+    private void handleBoosterCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("vault.admin.booster")) {
+            sender.sendMessage("§cYou do not have permission!");
+            return;
+        }
+        if (args.length < 4) {
+            sender.sendMessage("§cUsage: /vaultx booster <currency> <multiplier> <duration_ms|1h|30m>");
+            return;
+        }
+        String currency = args[1];
+        double mult;
+        try {
+            mult = Double.parseDouble(args[2]);
+        } catch (Exception e) {
+            sender.sendMessage("§cInvalid multiplier!");
+            return;
+        }
+        long durationMs = 3600000L;
+        String durStr = args[3].toLowerCase();
+        if (durStr.endsWith("m")) durationMs = Long.parseLong(durStr.replace("m", "")) * 60000L;
+        else if (durStr.endsWith("h")) durationMs = Long.parseLong(durStr.replace("h", "")) * 3600000L;
+        else if (durStr.endsWith("s")) durationMs = Long.parseLong(durStr.replace("s", "")) * 1000L;
+        else durationMs = Long.parseLong(durStr);
+
+        Vault.getBoosterAPI().registerGlobalBooster(currency, mult, durationMs);
+        Bukkit.broadcastMessage("§a§l🚀 EVENT BOOSTER §f" + mult + "x multiplier activated for §e" + currency.toUpperCase() + "§f!");
+    }
+
+    private void handleAuditLogCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("vault.admin.audit")) {
+            sender.sendMessage("§cYou do not have permission!");
+            return;
+        }
+        if (args.length < 2) {
+            sender.sendMessage("§cUsage: /vaultx audit <player> [limit]");
+            return;
+        }
+        OfflinePlayer target = Bukkit.getOfflinePlayer(args[1]);
+        int limit = args.length > 2 ? Integer.parseInt(args[2]) : 15;
+        Vault.getAuditAPI().getPlayerTransactionHistoryAsync(target, limit).thenAccept(logs -> {
+            sender.sendMessage("§8§m--------------------------------------------------");
+            sender.sendMessage("§6§l🔍 VaultX Audit Log §7(" + target.getName() + ")");
+            if (logs.isEmpty()) {
+                sender.sendMessage("§7No transaction logs found.");
+            } else {
+                for (var log : logs) {
+                    sender.sendMessage("§8[" + new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date(log.timestamp())) + "] §7" + log.type() + " §a" + log.amount() + " " + log.currency() + " §7(" + log.callerPlugin() + ")");
+                }
+            }
+            sender.sendMessage("§8§m--------------------------------------------------");
+        });
+    }
+
+    private void handlePayOffline(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("vault.admin.payoffline")) {
+            sender.sendMessage("§cYou do not have permission!");
+            return;
+        }
+        if (args.length < 4) {
+            sender.sendMessage("§cUsage: /vaultx payoffline <player> <currency> <amount> [reason]");
+            return;
+        }
+        OfflinePlayer target = Bukkit.getOfflinePlayer(args[1]);
+        String currency = args[2];
+        double amount = Double.parseDouble(args[3]);
+        String reason = args.length > 4 ? String.join(" ", java.util.Arrays.copyOfRange(args, 4, args.length)) : "Admin Payout";
+
+        Vault.getMailboxAPI().sendOfflinePaymentAsync(target, currency, amount, reason).thenAccept(success -> {
+            if (success) {
+                sender.sendMessage("§aSuccessfully sent offline payment of " + amount + " " + currency + " to " + target.getName() + "!");
+            } else {
+                sender.sendMessage("§cFailed to send offline payment.");
+            }
+        });
     }
 }
 
