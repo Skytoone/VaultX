@@ -287,6 +287,8 @@ central-bank:
 
 # Shared Bank Loans & Credit Configuration
 loans:
+  # Enable the bank loan and credit scoring system
+  enabled: true
   # Base interest rate applied to bank loans (in percent, e.g. 5.0 = 5% interest)
   interest-rate-percent: 5.0
   # How often loan installments are billed/collected (in minutes, e.g. 60 minutes = 1 hour)
@@ -297,6 +299,22 @@ loans:
   max-loans-per-player: 3
   # Overdue penalty rate applied if installment payment fails (in percent)
   overdue-penalty-percent: 2.5
+
+# Crypto Wallets & Digital Token Mining
+crypto:
+  # Enable digital token wallets and token mining (/vx crypto)
+  enabled: true
+  # Allow players to mine tokens via API or in-game actions
+  mining-enabled: true
+  # Network transaction fee percentage for crypto transfers (e.g. 0.1 = 0.1%)
+  transfer-fee-percent: 0.1
+
+# Financial Milestones & Wealth Achievements
+milestones:
+  # Enable financial balance milestones and achievements
+  enabled: true
+  # Broadcast a server-wide message when a player reaches a milestone
+  broadcast-achievements: true
 
 # Periodical Salaries / Allowances Configuration (Paydays)
 paydays:

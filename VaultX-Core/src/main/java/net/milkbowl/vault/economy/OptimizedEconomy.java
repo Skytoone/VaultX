@@ -1608,6 +1608,9 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     // ==========================================
     @Override
     public java.util.concurrent.CompletableFuture<org.bukkit.inventory.ItemStack> createCheckAsync(OfflinePlayer issuer, String currency, double amount) {
+        if (!plugin.getConfig().getBoolean("checks.enabled", true)) {
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
+        }
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
             org.bukkit.inventory.ItemStack check = new org.bukkit.inventory.ItemStack(org.bukkit.Material.PAPER);
             org.bukkit.inventory.meta.ItemMeta meta = check.getItemMeta();
@@ -1622,6 +1625,7 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
 
     @Override
     public boolean isCheck(org.bukkit.inventory.ItemStack item) {
+        if (!plugin.getConfig().getBoolean("checks.enabled", true)) return false;
         if (item == null || !item.hasItemMeta() || !item.getItemMeta().hasLore()) return false;
         var lore = item.getItemMeta().getLore();
         return lore != null && lore.stream().anyMatch(l -> l.contains("[VaultX Check]"));
@@ -1629,7 +1633,7 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
 
     @Override
     public CheckDetails getCheckDetails(org.bukkit.inventory.ItemStack item) {
-        if (!isCheck(item)) return null;
+        if (!plugin.getConfig().getBoolean("checks.enabled", true) || !isCheck(item)) return null;
         var lore = item.getItemMeta().getLore();
         double amt = 0;
         String curr = "default";
@@ -1647,6 +1651,9 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
 
     @Override
     public java.util.concurrent.CompletableFuture<EconomyResponse> redeemCheckAsync(OfflinePlayer player, org.bukkit.inventory.ItemStack item) {
+        if (!plugin.getConfig().getBoolean("checks.enabled", true)) {
+            return java.util.concurrent.CompletableFuture.completedFuture(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Checks feature is disabled in config.yml"));
+        }
         CheckDetails details = getCheckDetails(item);
         if (details == null) {
             return java.util.concurrent.CompletableFuture.completedFuture(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Invalid bank check"));
@@ -1668,11 +1675,17 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
 
     @Override
     public java.util.concurrent.CompletableFuture<EconomyResponse> takeLoanAsync(OfflinePlayer player, String currency, double amount, int durationDays, double interestRate) {
+        if (!plugin.getConfig().getBoolean("loans.enabled", true)) {
+            return java.util.concurrent.CompletableFuture.completedFuture(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Loans feature is disabled in config.yml"));
+        }
         return depositCurrencyPlayerAsync(player, currency, amount);
     }
 
     @Override
     public java.util.concurrent.CompletableFuture<EconomyResponse> repayLoanAsync(OfflinePlayer player, String loanId, double amount) {
+        if (!plugin.getConfig().getBoolean("loans.enabled", true)) {
+            return java.util.concurrent.CompletableFuture.completedFuture(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Loans feature is disabled in config.yml"));
+        }
         return withdrawPlayerAsync(player, amount);
     }
 
@@ -1719,7 +1732,9 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
 
     @Override
     public void registerMilestone(Milestone milestone) {
-        if (milestone != null) registeredMilestones.put(milestone.milestoneId(), milestone);
+        if (milestone != null && plugin.getConfig().getBoolean("milestones.enabled", true)) {
+            registeredMilestones.put(milestone.milestoneId(), milestone);
+        }
     }
 
     @Override
@@ -1729,6 +1744,9 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
 
     @Override
     public java.util.concurrent.CompletableFuture<Boolean> hasReachedMilestoneAsync(OfflinePlayer player, String milestoneId) {
+        if (!plugin.getConfig().getBoolean("milestones.enabled", true)) {
+            return java.util.concurrent.CompletableFuture.completedFuture(false);
+        }
         Milestone m = registeredMilestones.get(milestoneId);
         if (m == null) return java.util.concurrent.CompletableFuture.completedFuture(false);
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> getBalance(player) >= m.requiredBalance(), asyncExecutor);
@@ -1750,6 +1768,9 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
 
     @Override
     public java.util.concurrent.CompletableFuture<EconomyResponse> mineTokensAsync(OfflinePlayer player, String cryptoName, double amount) {
+        if (!plugin.getConfig().getBoolean("crypto.enabled", true) || !plugin.getConfig().getBoolean("crypto.mining-enabled", true)) {
+            return java.util.concurrent.CompletableFuture.completedFuture(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Crypto mining is disabled in config.yml"));
+        }
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
             if (player != null) {
                 cryptoWallets.computeIfAbsent(player.getUniqueId(), k -> new ConcurrentHashMap<>()).merge(cryptoName, amount, Double::sum);
@@ -1760,6 +1781,9 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
 
     @Override
     public java.util.concurrent.CompletableFuture<Boolean> transferCryptoAsync(String fromAddress, String toAddress, String cryptoName, double amount) {
+        if (!plugin.getConfig().getBoolean("crypto.enabled", true)) {
+            return java.util.concurrent.CompletableFuture.completedFuture(false);
+        }
         return java.util.concurrent.CompletableFuture.completedFuture(true);
     }
 }
