@@ -134,6 +134,7 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
             rateLimitWindow.entrySet().removeIf(e -> (now - e.getValue()) > 1000L);
             rateLimitCount.entrySet().removeIf(e -> !rateLimitWindow.containsKey(e.getKey()));
             rateLimitBlock.entrySet().removeIf(e -> now > e.getValue());
+            playerLocks.entrySet().removeIf(e -> Bukkit.getPlayer(e.getKey()) == null && !e.getValue().isLocked());
         }, 300L, 300L);
         preloadBanks();
     }
@@ -279,6 +280,11 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         rateLimitCount.clear();
         rateLimitBlock.clear();
         bankBalances.clear();
+        playerLocks.clear();
+        globalBoosters.clear();
+        globalBoosterExpirations.clear();
+        activeSubscriptions.clear();
+        customProviders.clear();
     }
 
     public void onPlayerJoin(Player player) {

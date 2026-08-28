@@ -104,10 +104,12 @@ public class UUIDCache implements Listener {
         }
     }
 
-    public static void cleanup() {
+    public static synchronized void cleanup() {
         nameToUuid.clear();
         uuidToName.clear();
         negativeCache.clear();
+        accessOrderNameQueue.clear();
+        accessOrderUuidQueue.clear();
         if (cleanupTask != null) {
             try {
                 cleanupTask.cancel();

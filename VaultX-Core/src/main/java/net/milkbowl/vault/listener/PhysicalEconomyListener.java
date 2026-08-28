@@ -181,14 +181,16 @@ public class PhysicalEconomyListener implements Listener {
                                         final String errMsg = depRes.errorMessage;
                                         net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
                                             fm.updateCheckStatus(finalCheckId, "ACTIVE");
+                                            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                                                CLAIMING_CHECKS.remove(finalCheckId);
+                                                restoreCheckItem(player, itemToRestore);
+                                                if (player.isOnline()) {
+                                                    player.sendMessage(Vault.getMessage("commands.check.deposit-failed", "§cDeposit failed: %error%")
+                                                            .replace("%error%", errMsg));
+                                                    VaultXVisuals.playFailureSound(player);
+                                                }
+                                            });
                                         });
-                                        CLAIMING_CHECKS.remove(finalCheckId);
-                                        restoreCheckItem(player, itemToRestore);
-                                        if (player.isOnline()) {
-                                            player.sendMessage(Vault.getMessage("commands.check.deposit-failed", "§cDeposit failed: %error%")
-                                                    .replace("%error%", errMsg));
-                                            VaultXVisuals.playFailureSound(player);
-                                        }
                                     }
                                 });
                             } catch (Exception e) {
@@ -254,14 +256,23 @@ public class PhysicalEconomyListener implements Listener {
         }
     }
 
-    private String getEventHandName(PlayerInteractEvent event) {
+    private static final java.lang.reflect.Method GET_HAND_METHOD;
+    static {
+        java.lang.reflect.Method m = null;
         try {
-            java.lang.reflect.Method m = event.getClass().getMethod("getHand");
-            Object res = m.invoke(event);
-            return res != null ? res.toString() : null;
-        } catch (Throwable e) {
-            return null;
+            m = PlayerInteractEvent.class.getMethod("getHand");
+        } catch (Throwable ignored) {}
+        GET_HAND_METHOD = m;
+    }
+
+    private String getEventHandName(PlayerInteractEvent event) {
+        if (GET_HAND_METHOD != null) {
+            try {
+                Object res = GET_HAND_METHOD.invoke(event);
+                return res != null ? res.toString() : null;
+            } catch (Throwable ignored) {}
         }
+        return null;
     }
 
     private void removeOneHandItem(Player player, String handName, ItemStack item) {

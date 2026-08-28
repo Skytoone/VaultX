@@ -77,6 +77,7 @@ public class TransactionFirewall {
             inflationTask = null;
         }
         transactionHistory.clear();
+        activeTransfers.clear();
         synchronized (supplySnapshots) {
             supplySnapshots.clear();
         }

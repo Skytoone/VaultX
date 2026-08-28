@@ -100,8 +100,8 @@ public class LocalFailoverManager {
             com.zaxxer.hikari.HikariConfig config = new com.zaxxer.hikari.HikariConfig();
             config.setJdbcUrl(jdbcUrl);
             config.setPoolName("VaultX-SQLite-Pool");
-            config.setMaximumPoolSize(1);
-            config.setMinimumIdle(1);
+            config.setMaximumPoolSize(MAX_POOL_SIZE);
+            config.setMinimumIdle(Math.max(2, MAX_POOL_SIZE / 4));
             config.setConnectionTimeout(2000);
             config.setConnectionInitSql("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
 
