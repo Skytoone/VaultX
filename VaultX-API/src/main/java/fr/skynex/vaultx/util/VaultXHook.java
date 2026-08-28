@@ -14,6 +14,10 @@ import net.milkbowl.vault.economy.VaultSubscriptionAPI;
 import net.milkbowl.vault.economy.VaultAnalyticsAPI;
 import net.milkbowl.vault.economy.VaultCurrencyRegistry;
 import net.milkbowl.vault.economy.VaultAuditAPI;
+import net.milkbowl.vault.economy.VaultEscrowAPI;
+import net.milkbowl.vault.economy.VaultFirewallAPI;
+import net.milkbowl.vault.economy.VaultBlackMarketAPI;
+import net.milkbowl.vault.economy.VaultStockAPI;
 
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.RegisteredServiceProvider;
@@ -133,6 +137,38 @@ public final class VaultXHook {
      */
     public static Optional<VaultAuditAPI> getAuditAPI() {
         RegisteredServiceProvider<VaultAuditAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultAuditAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultEscrowAPI service provider if available.
+     */
+    public static Optional<VaultEscrowAPI> getEscrowAPI() {
+        RegisteredServiceProvider<VaultEscrowAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultEscrowAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultFirewallAPI service provider if available.
+     */
+    public static Optional<VaultFirewallAPI> getFirewallAPI() {
+        RegisteredServiceProvider<VaultFirewallAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultFirewallAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultBlackMarketAPI service provider if available.
+     */
+    public static Optional<VaultBlackMarketAPI> getBlackMarketAPI() {
+        RegisteredServiceProvider<VaultBlackMarketAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultBlackMarketAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultStockAPI service provider if available.
+     */
+    public static Optional<VaultStockAPI> getStockAPI() {
+        RegisteredServiceProvider<VaultStockAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultStockAPI.class);
         return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
     }
 }
