@@ -12,7 +12,7 @@ import redis.clients.jedis.Jedis;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class ExchangeRateManager {
+public class ExchangeRateManager implements CurrencyExchangeAPI {
 
     private final Plugin plugin;
     private final Map<String, Double> rates = new ConcurrentHashMap<>();
@@ -386,6 +386,28 @@ public class ExchangeRateManager {
                 "Successfully exchanged " + amount + " " + fromCurrency.toUpperCase() + " to "
                         + String.format("%.4f", targetVal) + " " + toCurrency.toUpperCase(),
                 targetVal, finalFromBal, finalToBal);
+    }
+
+    @Override
+    public double getExchangeRate(String fromCurrency, String toCurrency) {
+        if (fromCurrency == null || toCurrency == null) return 1.0;
+        String from = fromCurrency.toLowerCase();
+        String to = toCurrency.toLowerCase();
+        if (from.equals(to)) return 1.0;
+        double fromRate = rates.getOrDefault(from, 1.0);
+        double toRate = rates.getOrDefault(to, 1.0);
+        if (toRate == 0.0) return 1.0;
+        return fromRate / toRate;
+    }
+
+    @Override
+    public double convert(String fromCurrency, String toCurrency, double amount) {
+        return amount * getExchangeRate(fromCurrency, toCurrency);
+    }
+
+    @Override
+    public Map<String, Double> getAllExchangeRates() {
+        return Collections.unmodifiableMap(new HashMap<>(rates));
     }
 }
 

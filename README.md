@@ -94,13 +94,44 @@ public class EconomyEventListener implements Listener {
     @EventHandler
     public void onTransaction(VaultTransactionEvent event) {
         Bukkit.getLogger().info("Transaction: " + event.getPlayerName() 
+            + " | Currency: " + event.getCurrency()
             + " | Amount: " + event.getAmount() 
+            + " | Target: " + event.getTargetName()
+            + " | New Balance: " + event.getNewBalance()
+            + " | Type: " + event.getType());
+    }
+
+    @EventHandler
+    public void onBankTransaction(VaultBankTransactionEvent event) {
+        Bukkit.getLogger().info("Bank Transaction: " + event.getBankName()
+            + " | Amount: " + event.getAmount()
+            + " | New Balance: " + event.getNewBankBalance()
             + " | Type: " + event.getType());
     }
 
     @EventHandler
     public void onInflationUpdate(VaultInflationUpdateEvent event) {
-        Bukkit.getLogger().info("New inflation multiplier: " + event.getNewRate());
+        Bukkit.getLogger().info("New inflation multiplier for " + event.getCurrency() + ": " + event.getNewMultiplier());
+    }
+}
+```
+
+### 3. Using Real-Time Currency Exchange API
+
+```java
+import net.milkbowl.vault.economy.CurrencyExchangeAPI;
+import org.bukkit.Bukkit;
+import org.bukkit.plugin.RegisteredServiceProvider;
+
+public class ForexExample {
+
+    public double convertGemsToDollars(double gemsAmount) {
+        RegisteredServiceProvider<CurrencyExchangeAPI> rsp = Bukkit.getServicesManager().getRegistration(CurrencyExchangeAPI.class);
+        if (rsp != null) {
+            CurrencyExchangeAPI exchange = rsp.getProvider();
+            return exchange.convert("gems", "dollars", gemsAmount);
+        }
+        return gemsAmount; // Fallback
     }
 }
 ```

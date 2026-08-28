@@ -92,6 +92,10 @@ public class Vault extends JavaPlugin {
         return escrowManager;
     }
 
+    public static net.milkbowl.vault.economy.CurrencyExchangeAPI getCurrencyExchangeAPI() {
+        return exchangeRateManager;
+    }
+
     public static net.milkbowl.vault.economy.ExchangeRateManager getExchangeRateManager() {
         return exchangeRateManager;
     }
@@ -295,6 +299,9 @@ public class Vault extends JavaPlugin {
         failoverManager = new net.milkbowl.vault.redis.LocalFailoverManager(this);
         escrowManager = new net.milkbowl.vault.redis.EscrowManager(this);
         exchangeRateManager = new net.milkbowl.vault.economy.ExchangeRateManager(this);
+        if (sm != null && exchangeRateManager != null) {
+            sm.register(net.milkbowl.vault.economy.CurrencyExchangeAPI.class, exchangeRateManager, this, ServicePriority.Normal);
+        }
         centralBankManager = new net.milkbowl.vault.economy.CentralBankManager(this, exchangeRateManager);
         mailboxManager = new net.milkbowl.vault.economy.MailboxManager(this);
         vaultXGUI = new net.milkbowl.vault.util.VaultXGUI(this);
