@@ -308,6 +308,9 @@ public class PhysicalEconomyListener implements Listener {
         for (net.milkbowl.vault.economy.OptimizedEconomy econ : Vault.getWrappedEconomies()) {
             econ.purgePlayerCache(uuid);
         }
+        if (Vault.getFirewall() != null) {
+            Vault.getFirewall().purgePlayer(uuid);
+        }
     }
 }
 

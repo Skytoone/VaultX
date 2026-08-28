@@ -217,6 +217,12 @@ public class TransactionFirewall {
         webhookNotifier.sendAlertAsync("UNFREEZE", op, "Unfrozen by admin", 3066993);
     }
 
+    public void purgePlayer(UUID uuid) {
+        if (uuid != null) {
+            transactionHistory.remove(uuid);
+        }
+    }
+
     public Set<UUID> getLocalFrozenPlayers() {
         return new HashSet<>(frozenPlayers);
     }
