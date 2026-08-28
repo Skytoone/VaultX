@@ -14,7 +14,12 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class BlackMarketManager {
+import org.bukkit.OfflinePlayer;
+import org.bukkit.Bukkit;
+import net.milkbowl.vault.economy.VaultBlackMarketAPI;
+import net.milkbowl.vault.economy.events.VaultBlackMarketLaunderEvent;
+
+public class BlackMarketManager implements VaultBlackMarketAPI {
 
     private final Plugin plugin;
     private final SecureRandom random = new SecureRandom();
@@ -28,39 +33,9 @@ public class BlackMarketManager {
         return playerLocks.computeIfAbsent(uuid, k -> new Object());
     }
 
-    public static class LaunderingResult {
-        private final boolean success;
-        private final boolean seized;
-        private final double dirtyLaundered;
-        private final double cleanReceived;
-        private final double feePaid;
-
+    public static class LaunderingResult extends VaultBlackMarketAPI.LaunderingResult {
         public LaunderingResult(boolean success, boolean seized, double dirtyLaundered, double cleanReceived, double feePaid) {
-            this.success = success;
-            this.seized = seized;
-            this.dirtyLaundered = dirtyLaundered;
-            this.cleanReceived = cleanReceived;
-            this.feePaid = feePaid;
-        }
-
-        public boolean isSuccess() {
-            return success;
-        }
-
-        public boolean isSeized() {
-            return seized;
-        }
-
-        public double getDirtyLaundered() {
-            return dirtyLaundered;
-        }
-
-        public double getCleanReceived() {
-            return cleanReceived;
-        }
-
-        public double getFeePaid() {
-            return feePaid;
+            super(success, seized, dirtyLaundered, cleanReceived, feePaid);
         }
     }
 
@@ -79,6 +54,21 @@ public class BlackMarketManager {
         } else {
             return dirtyBalances.getOrDefault(player.getUniqueId(), 0.0);
         }
+    }
+
+    @Override
+    public double getDirtyBalance(OfflinePlayer player) {
+        if (player == null) return 0.0;
+        if (player.isOnline() && player.getPlayer() != null) {
+            return getDirtyBalance(player.getPlayer());
+        }
+        return dirtyBalances.getOrDefault(player.getUniqueId(), 0.0);
+    }
+
+    @Override
+    public void setDirtyBalance(OfflinePlayer player, double amount) {
+        if (player == null) return;
+        dirtyBalances.put(player.getUniqueId(), Math.max(0.0, amount));
     }
 
     public void depositDirty(Player player, double amount) {
@@ -103,10 +93,32 @@ public class BlackMarketManager {
         }
     }
 
+    @Override
+    public void addDirtyMoney(OfflinePlayer player, double amount) {
+        if (player == null || amount <= 0) return;
+        if (player.isOnline() && player.getPlayer() != null) {
+            depositDirty(player.getPlayer(), amount);
+        } else {
+            dirtyBalances.merge(player.getUniqueId(), amount, Double::sum);
+        }
+    }
+
+    @Override
+    public LaunderingResult launder(Player player, double dirtyAmount) {
+        return launder(player, dirtyAmount, net.milkbowl.vault.Vault.getWrappedEconomies().isEmpty() ? null : net.milkbowl.vault.Vault.getWrappedEconomies().get(0));
+    }
+
     public LaunderingResult launder(Player player, double dirtyAmount, Economy econ) {
         if (player == null || dirtyAmount <= 0) {
             return new LaunderingResult(false, false, 0, 0, 0);
         }
+
+        VaultBlackMarketLaunderEvent event = new VaultBlackMarketLaunderEvent(player, dirtyAmount);
+        Bukkit.getPluginManager().callEvent(event);
+        if (event.isCancelled()) {
+            return new LaunderingResult(false, false, 0, 0, 0);
+        }
+        dirtyAmount = event.getDirtyAmount();
 
         double maxAllowed = plugin.getConfig().getDouble("blackmarket.max-per-transaction", 500000.0);
         if (maxAllowed > 0 && dirtyAmount > maxAllowed) {

@@ -10,9 +10,11 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
 
+import net.milkbowl.vault.economy.VaultStockAPI;
+import java.util.concurrent.CompletableFuture;
 import java.util.*;
 
-public class StockExchangeManager {
+public class StockExchangeManager implements VaultStockAPI {
 
     private final Plugin plugin;
     private final LocalFailoverManager failoverManager;
@@ -291,6 +293,98 @@ public class StockExchangeManager {
                 });
             }
         });
+    }
+
+    @Override
+    public double getCommodityPrice(String commodity) {
+        if (failoverManager == null || commodity == null) return 0.0;
+        return failoverManager.getCommodityPrice(commodity.toLowerCase());
+    }
+
+    @Override
+    public double getPlayerShares(UUID playerUuid, String commodityOrBank) {
+        if (failoverManager == null || playerUuid == null || commodityOrBank == null) return 0.0;
+        return failoverManager.getPlayerStockShares(playerUuid, commodityOrBank.toLowerCase());
+    }
+
+    @Override
+    public CompletableFuture<Boolean> buySharesAsync(Player player, String commodity, double shares) {
+        CompletableFuture<Boolean> future = new CompletableFuture<>();
+        if (player == null || commodity == null || shares <= 0 || failoverManager == null) {
+            future.complete(false);
+            return future;
+        }
+        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+            String comm = commodity.toLowerCase();
+            double price = failoverManager.getCommodityPrice(comm);
+            if (price <= 0.0) {
+                future.complete(false);
+                return;
+            }
+            double cost = price * shares;
+            Economy econ = getEconomy();
+            if (econ == null) {
+                future.complete(false);
+                return;
+            }
+            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                if (econ.getBalance(player) < cost) {
+                    future.complete(false);
+                    return;
+                }
+                EconomyResponse wRes = econ.withdrawPlayer(player, cost);
+                if (wRes.transactionSuccess()) {
+                    net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                        double currentShares = failoverManager.getPlayerStockShares(player.getUniqueId(), comm);
+                        failoverManager.updatePlayerStockShares(player.getUniqueId(), comm, currentShares + shares);
+                        failoverManager.updateCommodityPrice(comm, price * (1.0 + 0.0005 * shares));
+                        failoverManager.savePlayerTransaction(player.getUniqueId(), "WITHDRAW_STOCK_BUY", "default", cost, comm.toUpperCase());
+                        future.complete(true);
+                    });
+                } else {
+                    future.complete(false);
+                }
+            });
+        });
+        return future;
+    }
+
+    @Override
+    public CompletableFuture<Boolean> sellSharesAsync(Player player, String commodity, double shares) {
+        CompletableFuture<Boolean> future = new CompletableFuture<>();
+        if (player == null || commodity == null || shares <= 0 || failoverManager == null) {
+            future.complete(false);
+            return future;
+        }
+        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+            String comm = commodity.toLowerCase();
+            double price = failoverManager.getCommodityPrice(comm);
+            double currentShares = failoverManager.getPlayerStockShares(player.getUniqueId(), comm);
+            if (price <= 0.0 || currentShares < shares) {
+                future.complete(false);
+                return;
+            }
+            double payout = price * shares;
+            Economy econ = getEconomy();
+            if (econ == null) {
+                future.complete(false);
+                return;
+            }
+            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                EconomyResponse dRes = econ.depositPlayer(player, payout);
+                if (dRes.transactionSuccess()) {
+                    net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                        failoverManager.updatePlayerStockShares(player.getUniqueId(), comm, currentShares - shares);
+                        failoverManager.updateCommodityPrice(comm, Math.max(1.0, price * (1.0 - 0.0005 * shares)));
+                        failoverManager.savePlayerTransaction(player.getUniqueId(), "DEPOSIT_STOCK_SELL", "default", payout, comm.toUpperCase());
+                        future.complete(true);
+                    });
+                } else {
+                    future.complete(false);
+                }
+            });
+        });
+        return future;
     }
 }
 

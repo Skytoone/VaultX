@@ -10,13 +10,16 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import redis.clients.jedis.Jedis;
 
+import net.milkbowl.vault.economy.VaultEscrowAPI;
+import net.milkbowl.vault.economy.events.VaultEscrowCreateEvent;
+
 import java.util.UUID;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.HashMap;
 
-public class EscrowManager {
+public class EscrowManager implements VaultEscrowAPI {
 
     private final Plugin plugin;
     private final LocalFailoverManager failoverManager;
@@ -46,35 +49,15 @@ public class EscrowManager {
         return rsp != null ? rsp.getProvider() : null;
     }
 
-    public static class EscrowDetails {
-        public final String id;
-        public final UUID sender;
-        public final UUID receiver;
-        public final double amount;
-        public final String currency;
-        public final String status;
-        public final long timeoutAt;
-
+    public static class EscrowDetails extends VaultEscrowAPI.EscrowDetails {
         public EscrowDetails(String id, UUID sender, UUID receiver, double amount, String currency, String status, long timeoutAt) {
-            this.id = id;
-            this.sender = sender;
-            this.receiver = receiver;
-            this.amount = amount;
-            this.currency = currency;
-            this.status = status;
-            this.timeoutAt = timeoutAt;
+            super(id, sender, receiver, amount, currency, status, timeoutAt);
         }
     }
 
-    public static class EscrowResult {
-        public final boolean success;
-        public final String message;
-        public final String escrowId;
-
+    public static class EscrowResult extends VaultEscrowAPI.EscrowResult {
         public EscrowResult(boolean success, String message, String escrowId) {
-            this.success = success;
-            this.message = message;
-            this.escrowId = escrowId;
+            super(success, message, escrowId);
         }
     }
 
@@ -118,12 +101,21 @@ public class EscrowManager {
         return null;
     }
 
-    public java.util.concurrent.CompletableFuture<EscrowResult> startEscrow(Player sender, OfflinePlayer receiver, double amount, String currency, long timeoutSec) {
-        java.util.concurrent.CompletableFuture<EscrowResult> future = new java.util.concurrent.CompletableFuture<>();
+    public java.util.concurrent.CompletableFuture<VaultEscrowAPI.EscrowResult> startEscrow(Player sender, OfflinePlayer receiver, double amount, String currency, long timeoutSec) {
+        java.util.concurrent.CompletableFuture<VaultEscrowAPI.EscrowResult> future = new java.util.concurrent.CompletableFuture<>();
         if (!plugin.getConfig().getBoolean("escrow.enabled", true)) {
             future.complete(new EscrowResult(false, Vault.getMessage("escrow.disabled", "§cEscrow is disabled on this server."), null));
             return future;
         }
+
+        VaultEscrowCreateEvent createEvent = new VaultEscrowCreateEvent(sender, receiver, amount, currency, timeoutSec);
+        Bukkit.getPluginManager().callEvent(createEvent);
+        if (createEvent.isCancelled()) {
+            future.complete(new EscrowResult(false, "Escrow creation was cancelled by a plugin event.", null));
+            return future;
+        }
+        final double finalAmountParam = createEvent.getAmount();
+        final long finalTimeoutParam = createEvent.getTimeoutSec();
 
         int maxActive = plugin.getConfig().getInt("escrow.max-active-per-player", 5);
         if (maxActive > 0) {
@@ -221,8 +213,8 @@ public class EscrowManager {
         return future;
     }
 
-    public java.util.concurrent.CompletableFuture<EscrowResult> releaseEscrow(String escrowId, org.bukkit.command.CommandSender confirmer) {
-        java.util.concurrent.CompletableFuture<EscrowResult> future = new java.util.concurrent.CompletableFuture<>();
+    public java.util.concurrent.CompletableFuture<VaultEscrowAPI.EscrowResult> releaseEscrow(String escrowId, org.bukkit.command.CommandSender confirmer) {
+        java.util.concurrent.CompletableFuture<VaultEscrowAPI.EscrowResult> future = new java.util.concurrent.CompletableFuture<>();
         net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
             if (!PROCESSING_ESCROWS.add(escrowId)) {
                 future.complete(new EscrowResult(false, "Cette transaction est déjà en cours de traitement.", null));
@@ -313,8 +305,8 @@ public class EscrowManager {
         return future;
     }
 
-    public java.util.concurrent.CompletableFuture<EscrowResult> refundEscrow(String escrowId, org.bukkit.command.CommandSender requestor) {
-        java.util.concurrent.CompletableFuture<EscrowResult> future = new java.util.concurrent.CompletableFuture<>();
+    public java.util.concurrent.CompletableFuture<VaultEscrowAPI.EscrowResult> refundEscrow(String escrowId, org.bukkit.command.CommandSender requestor) {
+        java.util.concurrent.CompletableFuture<VaultEscrowAPI.EscrowResult> future = new java.util.concurrent.CompletableFuture<>();
         net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
             if (!PROCESSING_ESCROWS.add(escrowId)) {
                 future.complete(new EscrowResult(false, "Cette transaction est déjà en cours de traitement.", null));
@@ -489,6 +481,19 @@ public class EscrowManager {
             future.complete(list);
         });
         return future;
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<List<VaultEscrowAPI.EscrowDetails>> getPlayerEscrowsAsync(OfflinePlayer player) {
+        return listEscrows(player).thenApply(list -> {
+            List<VaultEscrowAPI.EscrowDetails> result = new ArrayList<>();
+            if (list != null) {
+                for (EscrowDetails e : list) {
+                    result.add(new VaultEscrowAPI.EscrowDetails(e.id, e.sender, e.receiver, e.amount, e.currency, e.status, e.timeoutAt));
+                }
+            }
+            return result;
+        });
     }
 }
 

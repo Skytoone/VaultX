@@ -13,8 +13,10 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListSet;
+import net.milkbowl.vault.economy.VaultFirewallAPI;
+import net.milkbowl.vault.economy.events.VaultPlayerFreezeEvent;
 
-public class TransactionFirewall {
+public class TransactionFirewall implements VaultFirewallAPI {
 
     private final Plugin plugin;
     private final File frozenFile;
@@ -169,10 +171,17 @@ public class TransactionFirewall {
 
     public void freezePlayerLocal(UUID uuid, String reason) {
         if (uuid == null) return;
+        OfflinePlayer op = Bukkit.getOfflinePlayer(uuid);
+
+        VaultPlayerFreezeEvent event = new VaultPlayerFreezeEvent(op, reason);
+        Bukkit.getPluginManager().callEvent(event);
+        if (event.isCancelled()) {
+            return;
+        }
+
         frozenPlayers.add(uuid);
         saveFrozenPlayers();
         
-        OfflinePlayer op = Bukkit.getOfflinePlayer(uuid);
         String name = net.milkbowl.vault.util.UUIDCache.getName(uuid);
         if (name == null) name = uuid.toString();
         String msg = net.milkbowl.vault.Vault.getMessage("firewall.admin-notify-frozen", "&c&l[VaultX Security] &cPlayer &e%player% &chas been frozen! Reason: &7%reason%")

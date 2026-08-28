@@ -140,6 +140,22 @@ public class Vault extends JavaPlugin {
         return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
     }
 
+    public static net.milkbowl.vault.economy.VaultEscrowAPI getEscrowAPI() {
+        return escrowManager;
+    }
+
+    public static net.milkbowl.vault.economy.VaultFirewallAPI getFirewallAPI() {
+        return firewall;
+    }
+
+    public static net.milkbowl.vault.economy.VaultBlackMarketAPI getBlackMarketAPI() {
+        return blackMarketManager;
+    }
+
+    public static net.milkbowl.vault.economy.VaultStockAPI getStockAPI() {
+        return stockExchangeManager;
+    }
+
     public static net.milkbowl.vault.economy.VaultBoosterAPI getBoosterAPI() {
         return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
     }
@@ -440,6 +456,20 @@ public class Vault extends JavaPlugin {
 
         // Register Physical Economy ATM & Check Listener
         getServer().getPluginManager().registerEvents(new net.milkbowl.vault.listener.PhysicalEconomyListener(this), this);
+
+        // Register Modern VaultX APIs in Bukkit ServicesManager
+        if (escrowManager != null) {
+            getServer().getServicesManager().register(net.milkbowl.vault.economy.VaultEscrowAPI.class, escrowManager, this, org.bukkit.plugin.ServicePriority.Highest);
+        }
+        if (firewall != null) {
+            getServer().getServicesManager().register(net.milkbowl.vault.economy.VaultFirewallAPI.class, firewall, this, org.bukkit.plugin.ServicePriority.Highest);
+        }
+        if (blackMarketManager != null) {
+            getServer().getServicesManager().register(net.milkbowl.vault.economy.VaultBlackMarketAPI.class, blackMarketManager, this, org.bukkit.plugin.ServicePriority.Highest);
+        }
+        if (stockExchangeManager != null) {
+            getServer().getServicesManager().register(net.milkbowl.vault.economy.VaultStockAPI.class, stockExchangeManager, this, org.bukkit.plugin.ServicePriority.Highest);
+        }
 
         // Register PlaceholderAPI Expansion if available
         if (Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
