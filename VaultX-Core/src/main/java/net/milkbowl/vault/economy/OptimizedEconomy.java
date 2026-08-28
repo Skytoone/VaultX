@@ -256,6 +256,8 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
             rateLimitCount.remove(uuid);
             rateLimitBlock.remove(uuid);
             negativeAccountCache.remove(uuid);
+            playerLocks.remove(uuid);
+            cryptoWallets.remove(uuid);
             if (useCache) {
                 balanceCache.remove(uuid);
                 offlineBalanceCache.remove(uuid);
@@ -285,6 +287,10 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         globalBoosterExpirations.clear();
         activeSubscriptions.clear();
         customProviders.clear();
+        cryptoWallets.clear();
+        registeredMilestones.clear();
+        inflationRates.clear();
+        taxRates.clear();
     }
 
     public void onPlayerJoin(Player player) {
