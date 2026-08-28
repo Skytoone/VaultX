@@ -22,7 +22,7 @@ import net.milkbowl.vault.redis.VaultRedisManager;
  * Redis cross-server synchronization, and Multi-Currency support.
  */
 @SuppressWarnings("deprecation")
-public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy, VaultLeaderboardAPI, VaultBatchTransactionAPI {
+public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy, VaultLeaderboardAPI, VaultBatchTransactionAPI, VaultFormatAPI, VaultMailboxAPI, VaultBoosterAPI {
 
     private final Economy delegate;
     private final boolean useCache;
@@ -74,6 +74,10 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     
     // Bank cache
     private final Map<String, Double> bankBalances = new ConcurrentHashMap<>();
+
+    // Booster cache
+    private final Map<String, Double> globalBoosters = new ConcurrentHashMap<>();
+    private final Map<String, Long> globalBoosterExpirations = new ConcurrentHashMap<>();
  
     private final org.bukkit.scheduler.BukkitTask cleanupTask;
 
@@ -1386,6 +1390,75 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
             }
             return new BatchResult(true, null, responses);
         }, asyncExecutor);
+    }
+
+    /* --- FORMAT, MAILBOX & BOOSTER API --- */
+
+    @Override
+    public String formatCurrency(String currency, double amount) {
+        return formatCurrency(currency, amount, java.util.Locale.getDefault());
+    }
+
+    @Override
+    public String formatCurrency(String currency, double amount, java.util.Locale locale) {
+        String sym = getCurrencySymbol(currency);
+        java.text.NumberFormat nf = java.text.NumberFormat.getNumberInstance(locale != null ? locale : java.util.Locale.getDefault());
+        nf.setMinimumFractionDigits(2);
+        nf.setMaximumFractionDigits(2);
+        return nf.format(amount) + " " + sym;
+    }
+
+    @Override
+    public String getCurrencySymbol(String currency) {
+        if (currency == null || currency.equalsIgnoreCase("default")) return "$";
+        if (currency.equalsIgnoreCase("gems")) return "💎";
+        if (currency.equalsIgnoreCase("tokens")) return "🪙";
+        if (currency.equalsIgnoreCase("coins")) return "🪙";
+        return currency.toUpperCase();
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Boolean> sendOfflinePaymentAsync(UUID targetUuid, String currency, double amount, String sourceReason) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (targetUuid == null || amount <= 0) return false;
+            OfflinePlayer target = Bukkit.getOfflinePlayer(targetUuid);
+            EconomyResponse res = depositCurrencyPlayer(target, currency, amount);
+            return res.transactionSuccess();
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Boolean> sendOfflinePaymentAsync(OfflinePlayer target, String currency, double amount, String sourceReason) {
+        return target != null ? sendOfflinePaymentAsync(target.getUniqueId(), currency, amount, sourceReason) : java.util.concurrent.CompletableFuture.completedFuture(false);
+    }
+
+    @Override
+    public double getGlobalMultiplier(String currency) {
+        String curr = currency == null ? "default" : currency.toLowerCase();
+        Long exp = globalBoosterExpirations.get(curr);
+        if (exp != null && System.currentTimeMillis() > exp) {
+            globalBoosters.remove(curr);
+            globalBoosterExpirations.remove(curr);
+            return 1.0;
+        }
+        return globalBoosters.getOrDefault(curr, 1.0);
+    }
+
+    @Override
+    public void registerGlobalBooster(String currency, double multiplier, long durationMs) {
+        String curr = currency == null ? "default" : currency.toLowerCase();
+        if (multiplier <= 1.0) {
+            globalBoosters.remove(curr);
+            globalBoosterExpirations.remove(curr);
+        } else {
+            globalBoosters.put(curr, multiplier);
+            globalBoosterExpirations.put(curr, System.currentTimeMillis() + durationMs);
+        }
+    }
+
+    @Override
+    public double calculateBoostedAmount(OfflinePlayer player, String currency, double baseAmount) {
+        return baseAmount * getGlobalMultiplier(currency);
     }
 
     private long getEffectiveTtl() {

@@ -116,10 +116,6 @@ public class EconomyEventListener implements Listener {
 }
 ```
 
-    }
-}
-```
-
 ### 3. Using 1-Line `VaultXHook` Helper
 
 ```java

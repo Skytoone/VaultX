@@ -7,6 +7,10 @@ import net.milkbowl.vault.economy.CurrencyExchangeAPI;
 import net.milkbowl.vault.economy.VaultLeaderboardAPI;
 import net.milkbowl.vault.economy.VaultBatchTransactionAPI;
 
+import net.milkbowl.vault.economy.VaultFormatAPI;
+import net.milkbowl.vault.economy.VaultMailboxAPI;
+import net.milkbowl.vault.economy.VaultBoosterAPI;
+
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import java.util.Optional;
@@ -61,6 +65,30 @@ public final class VaultXHook {
      */
     public static Optional<VaultBatchTransactionAPI> getBatchAPI() {
         RegisteredServiceProvider<VaultBatchTransactionAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultBatchTransactionAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultFormatAPI service provider if available.
+     */
+    public static Optional<VaultFormatAPI> getFormatAPI() {
+        RegisteredServiceProvider<VaultFormatAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultFormatAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultMailboxAPI service provider if available.
+     */
+    public static Optional<VaultMailboxAPI> getMailboxAPI() {
+        RegisteredServiceProvider<VaultMailboxAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultMailboxAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultBoosterAPI service provider if available.
+     */
+    public static Optional<VaultBoosterAPI> getBoosterAPI() {
+        RegisteredServiceProvider<VaultBoosterAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultBoosterAPI.class);
         return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
     }
 }
