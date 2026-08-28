@@ -19,4 +19,13 @@ public interface VaultAsyncEconomy {
     CompletableFuture<EconomyResponse> bankDepositAsync(String name, double amount);
     CompletableFuture<EconomyResponse> bankWithdrawAsync(String name, double amount);
     CompletableFuture<List<String>> getBanksAsync();
+
+    CompletableFuture<Double> getCurrencyBalanceAsync(OfflinePlayer player, String currency);
+    CompletableFuture<Double> getCurrencyBalanceAsync(String playerName, String currency);
+    
+    CompletableFuture<EconomyResponse> withdrawCurrencyPlayerAsync(OfflinePlayer player, String currency, double amount);
+    CompletableFuture<EconomyResponse> withdrawCurrencyPlayerAsync(String playerName, String currency, double amount);
+    
+    CompletableFuture<EconomyResponse> depositCurrencyPlayerAsync(OfflinePlayer player, String currency, double amount);
+    CompletableFuture<EconomyResponse> depositCurrencyPlayerAsync(String playerName, String currency, double amount);
 }

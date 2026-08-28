@@ -1296,6 +1296,36 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         return java.util.concurrent.CompletableFuture.supplyAsync(this::getBanks, asyncExecutor);
     }
 
+    @Override
+    public java.util.concurrent.CompletableFuture<Double> getCurrencyBalanceAsync(OfflinePlayer player, String currency) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> getCurrencyBalance(player, currency), asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Double> getCurrencyBalanceAsync(String playerName, String currency) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> getCurrencyBalance(playerName, currency), asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<EconomyResponse> withdrawCurrencyPlayerAsync(OfflinePlayer player, String currency, double amount) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> withdrawCurrencyPlayer(player, currency, amount), asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<EconomyResponse> withdrawCurrencyPlayerAsync(String playerName, String currency, double amount) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> withdrawCurrencyPlayer(playerName, currency, amount), asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<EconomyResponse> depositCurrencyPlayerAsync(OfflinePlayer player, String currency, double amount) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> depositCurrencyPlayer(player, currency, amount), asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<EconomyResponse> depositCurrencyPlayerAsync(String playerName, String currency, double amount) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> depositCurrencyPlayer(playerName, currency, amount), asyncExecutor);
+    }
+
     private long getEffectiveTtl() {
         net.milkbowl.vault.redis.VaultRedisManager redis = net.milkbowl.vault.redis.VaultRedisManager.getInstance();
         if (redis != null && redis.isOnline()) {
