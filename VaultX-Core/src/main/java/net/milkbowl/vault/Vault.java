@@ -493,7 +493,7 @@ public class Vault extends JavaPlugin {
         Bukkit.getConsoleSender().sendMessage("§e⚡ If you have any suggestions or encounter any bugs");
         Bukkit.getConsoleSender().sendMessage("§e   related to this plugin, please join this Discord server:");
         Bukkit.getConsoleSender().sendMessage("§8   » §bhttps://discord.gg/3QzcDHC6 §8«");
-        Bukkit.getConsoleSender().sendMessage("§7   Thank you for using this plugin — §6§lSkyNex§a. ");
+        Bukkit.getConsoleSender().sendMessage("§7   Thank you for using this plugin — §6§lSkytoone§a. ");
         Bukkit.getConsoleSender().sendMessage("§6   ⭐ §eDon't forget to rate this plugin §6⭐ ");
         Bukkit.getConsoleSender().sendMessage("§6───────────────────────────────────────────────────────────────────");
     }

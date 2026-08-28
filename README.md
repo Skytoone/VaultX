@@ -23,7 +23,7 @@ Add the JitPack repository and the `VaultX-API` dependency:
 <dependencies>
     <!-- VaultX API Dependency -->
     <dependency>
-        <groupId>com.github.Skynex</groupId>
+        <groupId>com.github.Skytoone</groupId>
         <artifactId>VaultX-API</artifactId>
         <version>1.1.2</version> <!-- Replace with desired tag or release version -->
         <scope>provided</scope>
@@ -40,7 +40,7 @@ repositories {
 }
 
 dependencies {
-    compileOnly 'com.github.Skynex:VaultX-API:1.1.2'
+    compileOnly 'com.github.Skytoone:VaultX-API:1.1.2'
 }
 ```
 
@@ -379,7 +379,7 @@ VaultX automatically registers official Placeholders when `PlaceholderAPI` is in
 To compile VaultX locally:
 
 ```bash
-git clone https://github.com/Skynex/VaultX.git
+git clone https://github.com/Skytoone/VaultX.git
 cd VaultX
 mvn clean package
 ```

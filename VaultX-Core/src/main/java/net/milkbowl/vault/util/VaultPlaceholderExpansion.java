@@ -47,7 +47,7 @@ public class VaultPlaceholderExpansion extends PlaceholderExpansion implements L
 
     @Override
     public String getAuthor() {
-        return "SkyNex";
+        return "Skytoone";
     }
 
     @Override
