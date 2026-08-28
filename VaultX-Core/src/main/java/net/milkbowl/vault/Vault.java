@@ -116,6 +116,10 @@ public class Vault extends JavaPlugin {
         return loanManager;
     }
 
+    public static java.util.List<OptimizedEconomy> getWrappedEconomies() {
+        return wrappedEconomies;
+    }
+
     @Override
     public void onDisable() {
         // Shutdown registered OptimizedEconomy thread pools and clear caches

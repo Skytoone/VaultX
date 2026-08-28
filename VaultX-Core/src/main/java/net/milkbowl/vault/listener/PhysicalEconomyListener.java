@@ -301,5 +301,13 @@ public class PhysicalEconomyListener implements Listener {
             }
         }
     }
+
+    @EventHandler
+    public void onPlayerQuit(org.bukkit.event.player.PlayerQuitEvent event) {
+        UUID uuid = event.getPlayer().getUniqueId();
+        for (net.milkbowl.vault.economy.OptimizedEconomy econ : Vault.getWrappedEconomies()) {
+            econ.purgePlayerCache(uuid);
+        }
+    }
 }
 

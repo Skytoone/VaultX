@@ -6,7 +6,7 @@
 
     <groupId>fr.skynex.vaultx</groupId>
     <artifactId>VaultX-Parent</artifactId>
-    <version>1.1.2</version>
+    <version>1.1.3</version>
     <packaging>pom</packaging>
     <name>VaultX-Parent</name>
     <description>Parent POM for VaultX Modern Economy system and API.</description>

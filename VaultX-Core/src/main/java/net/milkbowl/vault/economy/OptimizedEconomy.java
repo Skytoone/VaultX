@@ -34,11 +34,7 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     private final boolean autoConvert;
     private final org.bukkit.configuration.ConfigurationSection exchangeRates;
     private final long onlineCacheTtlMs;
-    private final java.util.concurrent.ExecutorService asyncExecutor = java.util.concurrent.Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "VaultX-AsyncExecutor");
-        t.setDaemon(true);
-        return t;
-    });
+    private final java.util.concurrent.ExecutorService asyncExecutor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
 
     // Cache entry structure for player balances
     private static class CacheEntry {
@@ -369,20 +365,39 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         }
     }
 
+    public void purgePlayerCache(UUID uuid) {
+        if (uuid == null) return;
+        balanceCache.remove(uuid);
+        offlineBalanceCache.remove(uuid);
+        negativeAccountCache.remove(uuid);
+        rateLimitWindow.remove(uuid);
+        rateLimitCount.remove(uuid);
+        rateLimitBlock.remove(uuid);
+    }
+
     private void triggerEventAsync(OfflinePlayer player, double amount, String currency, TransactionType type) {
         triggerEventAsync(player, null, amount, currency, type, null, -1.0);
     }
 
     private void triggerEventAsync(OfflinePlayer player, OfflinePlayer target, double amount, String currency, TransactionType type, String reason, double newBalance) {
+        boolean hasListeners = VaultTransactionEvent.getHandlerList().getRegisteredListeners().length > 0;
+        boolean hasFailover = net.milkbowl.vault.Vault.getFailoverManager() != null && player != null;
+
+        if (!hasListeners && !hasFailover && !debugTransactions) {
+            return; // Short-circuit: Zero allocations when no listeners or failover active
+        }
+
         if (debugTransactions) {
             Bukkit.getLogger().info("[Vault Debug] Transaction: " + type + " " + amount + " (" + (currency == null ? "default" : currency) + ") for player " + (player != null ? player.getName() : "Unknown"));
         }
         String caller = findCallerPlugin();
         String curr = currency == null ? "default" : currency;
         net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
-            VaultTransactionEvent event = new VaultTransactionEvent(player, target, amount, curr, type, caller, reason, newBalance);
-            Bukkit.getPluginManager().callEvent(event);
-            if (net.milkbowl.vault.Vault.getFailoverManager() != null && player != null) {
+            if (hasListeners) {
+                VaultTransactionEvent event = new VaultTransactionEvent(player, target, amount, curr, type, caller, reason, newBalance);
+                Bukkit.getPluginManager().callEvent(event);
+            }
+            if (hasFailover) {
                 net.milkbowl.vault.Vault.getFailoverManager().savePlayerTransaction(
                         player.getUniqueId(),
                         type.name(),
