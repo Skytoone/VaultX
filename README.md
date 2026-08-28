@@ -119,7 +119,7 @@ public class EconomyEventListener implements Listener {
 ### 3. Using 1-Line `VaultXHook` Helper
 
 ```java
-import net.milkbowl.vault.util.VaultXHook;
+import fr.skynex.vaultx.util.VaultXHook;
 import org.bukkit.entity.Player;
 
 public class QuickHookExample {
@@ -136,7 +136,7 @@ public class QuickHookExample {
 ### 4. Leaderboard & Top Balances API
 
 ```java
-import net.milkbowl.vault.util.VaultXHook;
+import fr.skynex.vaultx.util.VaultXHook;
 
 public class LeaderboardExample {
 
@@ -157,7 +157,7 @@ public class LeaderboardExample {
 ```java
 import net.milkbowl.vault.economy.VaultBatchTransactionAPI.BatchOperation;
 import net.milkbowl.vault.economy.VaultBatchTransactionAPI.OperationType;
-import net.milkbowl.vault.util.VaultXHook;
+import fr.skynex.vaultx.util.VaultXHook;
 import java.util.List;
 
 public class TradeSystem {
@@ -202,7 +202,7 @@ public class CombatLoggerProtection implements Listener {
 ### 7. Anti-Duplication Thread-Safe Lock (`VaultLockAPI`)
 
 ```java
-import net.milkbowl.vault.util.VaultXHook;
+import fr.skynex.vaultx.util.VaultXHook;
 import org.bukkit.entity.Player;
 
 public class CasinoGame {
@@ -227,7 +227,7 @@ public class CasinoGame {
 
 ```java
 import net.milkbowl.vault.economy.MultiCurrencyEconomy;
-import net.milkbowl.vault.util.VaultXTestKit;
+import fr.skynex.vaultx.util.VaultXTestKit;
 import org.junit.jupiter.api.Test;
 
 public class PluginUnitTest {
@@ -246,7 +246,7 @@ public class PluginUnitTest {
 ### 9. Real-Time Currency Exchange API (`CurrencyExchangeAPI`)
 
 ```java
-import net.milkbowl.vault.util.VaultXHook;
+import fr.skynex.vaultx.util.VaultXHook;
 
 public class ForexSystem {
 
@@ -261,7 +261,7 @@ public class ForexSystem {
 ### 10. Recurring Subscriptions & Taxes (`VaultSubscriptionAPI`)
 
 ```java
-import net.milkbowl.vault.util.VaultXHook;
+import fr.skynex.vaultx.util.VaultXHook;
 import org.bukkit.entity.Player;
 
 public class TownyTaxSystem {
@@ -278,7 +278,7 @@ public class TownyTaxSystem {
 ### 11. Offline Player Payouts (`VaultMailboxAPI`)
 
 ```java
-import net.milkbowl.vault.util.VaultXHook;
+import fr.skynex.vaultx.util.VaultXHook;
 import java.util.UUID;
 
 public class AuctionHousePayout {
@@ -294,7 +294,7 @@ public class AuctionHousePayout {
 ### 12. Payout Boosters & Event Multipliers (`VaultBoosterAPI`)
 
 ```java
-import net.milkbowl.vault.util.VaultXHook;
+import fr.skynex.vaultx.util.VaultXHook;
 
 public class EventManager {
 
@@ -310,7 +310,7 @@ public class EventManager {
 ### 13. Economy Server-Wide Analytics (`VaultAnalyticsAPI`)
 
 ```java
-import net.milkbowl.vault.util.VaultXHook;
+import fr.skynex.vaultx.util.VaultXHook;
 
 public class AdminStats {
 
@@ -327,7 +327,7 @@ public class AdminStats {
 ### 14. Custom Currency Registration (`VaultCurrencyRegistry`)
 
 ```java
-import net.milkbowl.vault.util.VaultXHook;
+import fr.skynex.vaultx.util.VaultXHook;
 
 public class CustomAddon {
 
@@ -342,7 +342,7 @@ public class CustomAddon {
 ### 15. Transaction History Audit (`VaultAuditAPI`)
 
 ```java
-import net.milkbowl.vault.util.VaultXHook;
+import fr.skynex.vaultx.util.VaultXHook;
 import org.bukkit.entity.Player;
 
 public class SecurityAudit {
