@@ -869,6 +869,47 @@ public class LocalFailoverManager {
         }, new java.util.ArrayList<>(), "Failed to load player transactions");
     }
 
+    public double getTotalMoneySupply(String currency) {
+        String query = "SELECT SUM(balance) FROM user_balances WHERE currency = ?";
+        return executeDatabaseQuery(conn -> {
+            try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                pstmt.setString(1, currency != null ? currency.toLowerCase() : "default");
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) return rs.getDouble(1);
+                }
+            }
+            return 0.0;
+        }, 0.0, "Failed to get total money supply");
+    }
+
+    public double getAverageAccountBalance(String currency) {
+        String query = "SELECT AVG(balance) FROM user_balances WHERE currency = ?";
+        return executeDatabaseQuery(conn -> {
+            try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                pstmt.setString(1, currency != null ? currency.toLowerCase() : "default");
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) return rs.getDouble(1);
+                }
+            }
+            return 0.0;
+        }, 0.0, "Failed to get average account balance");
+    }
+
+    public double getTransactionVolume24h(String currency) {
+        long timestamp24h = System.currentTimeMillis() - (24 * 60 * 60 * 1000L);
+        String query = "SELECT SUM(amount) FROM player_transactions WHERE currency = ? AND timestamp >= ?";
+        return executeDatabaseQuery(conn -> {
+            try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                pstmt.setString(1, currency != null ? currency.toLowerCase() : "default");
+                pstmt.setLong(2, timestamp24h);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) return rs.getDouble(1);
+                }
+            }
+            return 0.0;
+        }, 0.0, "Failed to get 24h volume");
+    }
+
     private void startBatchWriter() {
         this.running = true;
         this.batchWriterThread = new Thread(this::runBatchWriteLoop, "VaultX-BatchWriter");

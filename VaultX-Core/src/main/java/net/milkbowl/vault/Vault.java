@@ -144,6 +144,18 @@ public class Vault extends JavaPlugin {
         return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
     }
 
+    public static net.milkbowl.vault.economy.VaultAnalyticsAPI getAnalyticsAPI() {
+        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+    }
+
+    public static net.milkbowl.vault.economy.VaultCurrencyRegistry getCurrencyRegistry() {
+        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+    }
+
+    public static net.milkbowl.vault.economy.VaultAuditAPI getAuditAPI() {
+        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+    }
+
     @Override
     public void onDisable() {
         // Shutdown registered OptimizedEconomy thread pools and clear caches
@@ -331,6 +343,9 @@ public class Vault extends JavaPlugin {
             sm.register(net.milkbowl.vault.economy.VaultBoosterAPI.class, primaryEcon, this, ServicePriority.Normal);
             sm.register(net.milkbowl.vault.economy.VaultLockAPI.class, primaryEcon, this, ServicePriority.Normal);
             sm.register(net.milkbowl.vault.economy.VaultSubscriptionAPI.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultAnalyticsAPI.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultCurrencyRegistry.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultAuditAPI.class, primaryEcon, this, ServicePriority.Normal);
         }
 
         // Register PlaceholderAPI expansion if present

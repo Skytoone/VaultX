@@ -307,6 +307,56 @@ public class EventManager {
 }
 ```
 
+### 13. Economy Server-Wide Analytics (`VaultAnalyticsAPI`)
+
+```java
+import net.milkbowl.vault.util.VaultXHook;
+
+public class AdminStats {
+
+    public void printServerMoneySupply() {
+        VaultXHook.getAnalyticsAPI().ifPresent(api -> {
+            api.getTotalSupplyAsync("dollars").thenAccept(total -> {
+                System.out.println("Total dollars in circulation: $" + total);
+            });
+        });
+    }
+}
+```
+
+### 14. Custom Currency Registration (`VaultCurrencyRegistry`)
+
+```java
+import net.milkbowl.vault.util.VaultXHook;
+
+public class CustomAddon {
+
+    public void registerCryptoCurrency() {
+        VaultXHook.getCurrencyRegistry().ifPresent(registry -> {
+            registry.registerCurrency("crypto", new MyCryptoProvider());
+        });
+    }
+}
+```
+
+### 15. Transaction History Audit (`VaultAuditAPI`)
+
+```java
+import net.milkbowl.vault.util.VaultXHook;
+import org.bukkit.entity.Player;
+
+public class SecurityAudit {
+
+    public void checkPlayerLogs(Player player) {
+        VaultXHook.getAuditAPI().ifPresent(api -> {
+            api.getPlayerTransactionHistoryAsync(player, 20).thenAccept(logs -> {
+                logs.forEach(log -> System.out.println(log.timestamp() + " | " + log.type() + " | " + log.amount()));
+            });
+        });
+    }
+}
+```
+
 ---
 
 ## 🔌 PlaceholderAPI Placeholders

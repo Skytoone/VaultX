@@ -22,7 +22,7 @@ import net.milkbowl.vault.redis.VaultRedisManager;
  * Redis cross-server synchronization, and Multi-Currency support.
  */
 @SuppressWarnings("deprecation")
-public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy, VaultLeaderboardAPI, VaultBatchTransactionAPI, VaultFormatAPI, VaultMailboxAPI, VaultBoosterAPI, VaultLockAPI, VaultSubscriptionAPI {
+public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy, VaultLeaderboardAPI, VaultBatchTransactionAPI, VaultFormatAPI, VaultMailboxAPI, VaultBoosterAPI, VaultLockAPI, VaultSubscriptionAPI, VaultAnalyticsAPI, VaultCurrencyRegistry, VaultAuditAPI {
 
     private final Economy delegate;
     private final boolean useCache;
@@ -79,9 +79,10 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     private final Map<String, Double> globalBoosters = new ConcurrentHashMap<>();
     private final Map<String, Long> globalBoosterExpirations = new ConcurrentHashMap<>();
 
-    // Lock and Subscription cache
+    // Lock, Subscription and Registry cache
     private final Map<UUID, java.util.concurrent.locks.ReentrantLock> playerLocks = new ConcurrentHashMap<>();
     private final Map<String, SubscriptionDetails> activeSubscriptions = new ConcurrentHashMap<>();
+    private final Map<String, CustomCurrencyProvider> customProviders = new ConcurrentHashMap<>();
  
     private final org.bukkit.scheduler.BukkitTask cleanupTask;
 
@@ -1506,6 +1507,78 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
             if (subscriptionId == null) return false;
             return activeSubscriptions.remove(subscriptionId) != null;
+        }, asyncExecutor);
+    }
+
+    /* --- ANALYTICS, REGISTRY & AUDIT API --- */
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Double> getTotalSupplyAsync(String currency) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (net.milkbowl.vault.Vault.getFailoverManager() != null) {
+                return net.milkbowl.vault.Vault.getFailoverManager().getTotalMoneySupply(currency == null ? "default" : currency);
+            }
+            return 0.0;
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Double> getAverageBalanceAsync(String currency) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (net.milkbowl.vault.Vault.getFailoverManager() != null) {
+                return net.milkbowl.vault.Vault.getFailoverManager().getAverageAccountBalance(currency == null ? "default" : currency);
+            }
+            return 0.0;
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Double> getVolume24hAsync(String currency) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (net.milkbowl.vault.Vault.getFailoverManager() != null) {
+                return net.milkbowl.vault.Vault.getFailoverManager().getTransactionVolume24h(currency == null ? "default" : currency);
+            }
+            return 0.0;
+        }, asyncExecutor);
+    }
+
+    @Override
+    public boolean registerCurrency(String currency, CustomCurrencyProvider provider) {
+        if (currency == null || provider == null) return false;
+        customProviders.put(currency.toLowerCase(), provider);
+        return true;
+    }
+
+    @Override
+    public boolean unregisterCurrency(String currency) {
+        if (currency == null) return false;
+        return customProviders.remove(currency.toLowerCase()) != null;
+    }
+
+    @Override
+    public java.util.List<String> getRegisteredCustomCurrencies() {
+        return new java.util.ArrayList<>(customProviders.keySet());
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<java.util.List<AuditLogEntry>> getPlayerTransactionHistoryAsync(OfflinePlayer player, int limit) {
+        return player != null ? getPlayerTransactionHistoryAsync(player.getUniqueId(), limit) : java.util.concurrent.CompletableFuture.completedFuture(java.util.Collections.emptyList());
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<java.util.List<AuditLogEntry>> getPlayerTransactionHistoryAsync(UUID playerUuid, int limit) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            java.util.List<AuditLogEntry> logs = new java.util.ArrayList<>();
+            if (playerUuid != null && net.milkbowl.vault.Vault.getFailoverManager() != null) {
+                var records = net.milkbowl.vault.Vault.getFailoverManager().getPlayerTransactions(playerUuid, 1, limit);
+                if (records != null) {
+                    for (var r : records) {
+                        UUID u = r.uuid != null ? UUID.fromString(r.uuid) : playerUuid;
+                        logs.add(new AuditLogEntry(u, r.type, r.currency, r.amount, r.otherParty, r.timestamp));
+                    }
+                }
+            }
+            return logs;
         }, asyncExecutor);
     }
 
