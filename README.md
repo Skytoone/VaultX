@@ -562,6 +562,31 @@ VaultX automatically registers official Placeholders when `PlaceholderAPI` is in
 
 ---
 
+## 🛠️ Commands & Permissions
+
+| Command | Description | Permission | Default Aliases |
+| :--- | :--- | :--- | :--- |
+| `/vaultx` | Main plugin command & admin controls | `vault.use` | `/vx` |
+| `/money` | View your balances across currencies | `vault.command.money` | `/balance`, `/bal` |
+| `/pay <player> <amount> [currency]` | Pay money to another player | `vault.command.pay` | None |
+| `/baltop [currency]` | View global wealth leaderboard | `vault.top` | `/moneytop` |
+| `/bank` | Manage shared group & town bank accounts | `vault.command.bank` | `/sharedbank` |
+| `/loan` | Access bank loans, credit scores & repayments | `vault.command.loan` | `/loans` |
+| `/mailbox` | Collect offline payments & mail notifications | `vault.command.mailbox` | `/mail` |
+| `/escrow` | Initiate secure third-party player trades | `vault.command.escrow` | None |
+| `/stocks` | View real-time commodities stock market | `vault.command.stocks` | `/stockmarket` |
+| `/exchange` | Convert between custom currencies | `vault.convert` | `/forex`, `/convert` |
+| `/eco <give\|take\|set> <player> <amount>` | Admin economy management | `vault.admin` | `/economy` |
+| `/check write <amount>` | Issue a physical bank check item | `vault.command.check` | `/cheque` |
+| `/payday` | Claim periodic group salary allowance | `vault.command.payday` | `/salary` |
+| `/transactions` | View personal transaction audit log | `vault.command.transactions` | `/tx`, `/history` |
+| `/subscribe` | Manage recurring payments & rent | `vault.command.subscribe` | `/subscriptions` |
+| `/dynamicpricing` | View dynamic price scaling & inflation | `vault.admin` | `/dp`, `/dynamic` |
+| `/blackmarket` | Launder dirty money at the Black Market | `vault.command.blackmarket` | `/launder`, `/marchenoir` |
+| `/discord` | Link your Minecraft account to Discord | `vault.command.discord` | `/linkdiscord` |
+
+---
+
 ## 🛠️ Building from Source
 
 To compile VaultX locally:
