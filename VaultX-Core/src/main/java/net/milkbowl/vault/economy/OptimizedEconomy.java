@@ -370,18 +370,23 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     }
 
     private void triggerEventAsync(OfflinePlayer player, double amount, String currency, TransactionType type) {
+        triggerEventAsync(player, null, amount, currency, type, null, -1.0);
+    }
+
+    private void triggerEventAsync(OfflinePlayer player, OfflinePlayer target, double amount, String currency, TransactionType type, String reason, double newBalance) {
         if (debugTransactions) {
             Bukkit.getLogger().info("[Vault Debug] Transaction: " + type + " " + amount + " (" + (currency == null ? "default" : currency) + ") for player " + (player != null ? player.getName() : "Unknown"));
         }
         String caller = findCallerPlugin();
+        String curr = currency == null ? "default" : currency;
         net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
-            VaultTransactionEvent event = new VaultTransactionEvent(player, amount, type, caller);
+            VaultTransactionEvent event = new VaultTransactionEvent(player, target, amount, curr, type, caller, reason, newBalance);
             Bukkit.getPluginManager().callEvent(event);
             if (net.milkbowl.vault.Vault.getFailoverManager() != null && player != null) {
                 net.milkbowl.vault.Vault.getFailoverManager().savePlayerTransaction(
                         player.getUniqueId(),
                         type.name(),
-                        currency == null ? "default" : currency,
+                        curr,
                         amount,
                         caller
                 );
