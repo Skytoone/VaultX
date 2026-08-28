@@ -32,6 +32,10 @@ public class PhysicalEconomyListener implements Listener {
     private final Vault plugin;
     private static final Set<String> CLAIMING_CHECKS = ConcurrentHashMap.newKeySet();
 
+    public static void cleanup() {
+        CLAIMING_CHECKS.clear();
+    }
+
     public PhysicalEconomyListener(Vault plugin) {
         this.plugin = plugin;
     }

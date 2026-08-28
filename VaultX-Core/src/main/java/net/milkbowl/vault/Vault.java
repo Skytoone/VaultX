@@ -277,6 +277,20 @@ public class Vault extends JavaPlugin {
             }
         }
 
+        // Shutdown and clear wrapped economies to prevent memory retention across plugin reloads
+        for (OptimizedEconomy econ : wrappedEconomies) {
+            if (econ != null) {
+                try {
+                    econ.shutdown();
+                } catch (Exception ignored) {}
+            }
+        }
+        wrappedEconomies.clear();
+
+        // Clear physical economy listener static checks cache
+        net.milkbowl.vault.listener.PhysicalEconomyListener.cleanup();
+        net.milkbowl.vault.util.UUIDCache.cleanup();
+
         // Reset all static references to null to prevent memory retention or stale access on plugin disable
         vaultXGUI = null;
         firewall = null;
