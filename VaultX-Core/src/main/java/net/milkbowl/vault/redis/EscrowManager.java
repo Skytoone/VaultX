@@ -34,6 +34,7 @@ public class EscrowManager {
             autoRefundTask.cancel();
             autoRefundTask = null;
         }
+        PROCESSING_ESCROWS.clear();
     }
 
     private VaultRedisManager getRedisManager() {
