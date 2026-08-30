@@ -552,6 +552,34 @@ public class CryptoMiner {
 }
 ```
 
+### 25. Atomic Snapshots & 1-Click Rollback API (`VaultSnapshotAPI`)
+
+Take point-in-time economy snapshots and perform 1-click server-wide or per-player economy rollbacks following dupe exploits:
+
+```java
+import fr.skynex.vaultx.util.VaultXHook;
+import java.util.UUID;
+
+public class DupeProtectionManager {
+
+    public void createBackupSnapshot() {
+        VaultXHook.getSnapshotAPI().ifPresent(api -> {
+            api.createSnapshotAsync("Daily Auto Backup").thenAccept(snap -> {
+                System.out.println("Snapshot created: " + snap.snapshotId());
+            });
+        });
+    }
+
+    public void rollbackPlayerAfterExploit(UUID playerUuid, String snapshotId) {
+        VaultXHook.getSnapshotAPI().ifPresent(api -> {
+            api.restorePlayerSnapshotAsync(playerUuid, snapshotId).thenAccept(success -> {
+                if (success) System.out.println("Player economy restored!");
+            });
+        });
+    }
+}
+```
+
 ---
 
 ## 🔌 PlaceholderAPI Placeholders
@@ -578,6 +606,7 @@ VaultX automatically registers official Placeholders when `PlaceholderAPI` is in
 | Command | Description | Permission | Default Aliases |
 | :--- | :--- | :--- | :--- |
 | `/vaultx` | Main plugin command & admin controls | `vault.use` | `/vx` |
+| `/vaultx admin snapshot <create\|list\|rollback\|delete>` | Atomic snapshots & 1-click economy rollbacks | `vault.admin` | `/vx admin snapshot` |
 | `/money` | View your balances across currencies | `vault.command.money` | `/balance`, `/bal` |
 | `/pay <player> <amount> [currency]` | Pay money to another player | `vault.command.pay` | None |
 | `/baltop [currency]` | View global wealth leaderboard | `vault.top` | `/moneytop` |
