@@ -23,6 +23,10 @@ import net.milkbowl.vault.economy.VaultLoanAPI;
 import net.milkbowl.vault.economy.VaultInflationAPI;
 import net.milkbowl.vault.economy.VaultMilestoneAPI;
 import net.milkbowl.vault.economy.VaultCryptoAPI;
+import net.milkbowl.vault.economy.VaultAuctionAPI;
+import net.milkbowl.vault.economy.VaultStakingAPI;
+import net.milkbowl.vault.economy.VaultTaxAPI;
+import net.milkbowl.vault.economy.VaultCreditAPI;
 
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.RegisteredServiceProvider;
@@ -214,6 +218,38 @@ public final class VaultXHook {
      */
     public static Optional<VaultCryptoAPI> getCryptoAPI() {
         RegisteredServiceProvider<VaultCryptoAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultCryptoAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultAuctionAPI service provider if available.
+     */
+    public static Optional<VaultAuctionAPI> getAuctionAPI() {
+        RegisteredServiceProvider<VaultAuctionAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultAuctionAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultStakingAPI service provider if available.
+     */
+    public static Optional<VaultStakingAPI> getStakingAPI() {
+        RegisteredServiceProvider<VaultStakingAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultStakingAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultTaxAPI service provider if available.
+     */
+    public static Optional<VaultTaxAPI> getTaxAPI() {
+        RegisteredServiceProvider<VaultTaxAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultTaxAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultCreditAPI service provider if available.
+     */
+    public static Optional<VaultCreditAPI> getCreditAPI() {
+        RegisteredServiceProvider<VaultCreditAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultCreditAPI.class);
         return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
     }
 }

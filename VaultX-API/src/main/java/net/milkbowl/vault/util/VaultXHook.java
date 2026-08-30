@@ -34,4 +34,8 @@ public final class VaultXHook {
     public static Optional<VaultInflationAPI> getInflationAPI() { return fr.skynex.vaultx.util.VaultXHook.getInflationAPI(); }
     public static Optional<VaultMilestoneAPI> getMilestoneAPI() { return fr.skynex.vaultx.util.VaultXHook.getMilestoneAPI(); }
     public static Optional<VaultCryptoAPI> getCryptoAPI() { return fr.skynex.vaultx.util.VaultXHook.getCryptoAPI(); }
+    public static Optional<VaultAuctionAPI> getAuctionAPI() { return fr.skynex.vaultx.util.VaultXHook.getAuctionAPI(); }
+    public static Optional<VaultStakingAPI> getStakingAPI() { return fr.skynex.vaultx.util.VaultXHook.getStakingAPI(); }
+    public static Optional<VaultTaxAPI> getTaxAPI() { return fr.skynex.vaultx.util.VaultXHook.getTaxAPI(); }
+    public static Optional<VaultCreditAPI> getCreditAPI() { return fr.skynex.vaultx.util.VaultXHook.getCreditAPI(); }
 }
