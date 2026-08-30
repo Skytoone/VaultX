@@ -102,14 +102,18 @@ security:
 
 storage:
   # Local or shared storage type for failover and audit.
-  # Possible values: sqlite, mysql, mariadb
+  # Possible values: sqlite, mysql, mariadb, postgresql
   type: "sqlite"
+
+  # Sync engine provider across servers for RAM cache invalidation and atomic sync.
+  # Possible values: redis, postgresql, none
+  sync-provider: "redis"
 
   # Prune player transactions and security audits older than this number of days (runs hourly).
   # Set to -1 or 0 to disable automated pruning.
   transaction-history-retention-days: 30
 
-  # Configuration for mysql and mariadb (ignored if sqlite is selected)
+  # Configuration for mysql and mariadb (ignored if sqlite/postgresql is selected)
   mysql:
     host: "127.0.0.1"
     port: 3306
@@ -118,6 +122,16 @@ storage:
     password: ""
     # Additional parameters for the JDBC connection string (e.g., SSL, timezone)
     properties: "?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
+
+  # Configuration for postgresql (used if storage.type is postgresql or sync-provider is postgresql)
+  postgresql:
+    host: "127.0.0.1"
+    port: 5432
+    database: "vaultx"
+    username: "postgres"
+    password: ""
+    properties: ""
+    channel: "vaultx_sync"
 
 banks:
   # Replace the existing bank system with a native

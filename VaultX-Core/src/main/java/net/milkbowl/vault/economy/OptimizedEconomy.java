@@ -81,7 +81,22 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     // Lock, Subscription and Registry cache
     private final StripedLock stripedLock = new StripedLock();
     private final Map<String, SubscriptionDetails> activeSubscriptions = new ConcurrentHashMap<>();
+    public static class NativeCurrencyConfig {
+        public final String currencyId;
+        public final String symbol;
+        public final double startingBalance;
+        public final double exchangeRate;
+
+        public NativeCurrencyConfig(String currencyId, String symbol, double startingBalance, double exchangeRate) {
+            this.currencyId = currencyId;
+            this.symbol = symbol;
+            this.startingBalance = startingBalance;
+            this.exchangeRate = exchangeRate;
+        }
+    }
+
     private final Map<String, CustomCurrencyProvider> customProviders = new ConcurrentHashMap<>();
+    private final Map<String, NativeCurrencyConfig> nativeRegisteredCurrencies = new ConcurrentHashMap<>();
  
     private final org.bukkit.scheduler.BukkitTask cleanupTask;
 
@@ -353,6 +368,10 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         if (redis != null) {
             redis.publishBalanceUpdate(player.getUniqueId(), currency == null ? "default" : currency, newBalance);
         }
+        net.milkbowl.vault.redis.VaultPostgresManager postgres = net.milkbowl.vault.redis.VaultPostgresManager.getInstance();
+        if (postgres != null) {
+            postgres.updateBalance(player.getUniqueId(), currency == null ? "default" : currency, newBalance);
+        }
     }
 
     public void updateCacheFromRedis(UUID uuid, String currency, double newBalance) {
@@ -371,8 +390,17 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     private void saveCustomCurrencyBalance(OfflinePlayer player, String currency, double balance) {
         String curr = currency == null ? "default" : currency.toLowerCase();
         VaultRedisManager redis = VaultRedisManager.getInstance();
+        net.milkbowl.vault.redis.VaultPostgresManager postgres = net.milkbowl.vault.redis.VaultPostgresManager.getInstance();
         if (redis != null) {
             redis.setCustomCurrencyBalance(player.getUniqueId(), curr, balance);
+        } else if (postgres != null) {
+            postgres.updateBalance(player.getUniqueId(), curr, balance);
+            final UUID uuid = player.getUniqueId();
+            final String normalizedCurr = curr;
+            final double newBal = balance;
+            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                net.milkbowl.vault.Vault.getFailoverManager().saveCustomCurrencyBalance(uuid, normalizedCurr, newBal);
+            });
         } else {
             final UUID uuid = player.getUniqueId();
             final String normalizedCurr = curr;
@@ -786,8 +814,12 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         if (bankBalances.containsKey(name.toLowerCase())) return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Bank exists");
         bankBalances.put(name.toLowerCase(), 0.0);
         VaultRedisManager redis = VaultRedisManager.getInstance();
+        net.milkbowl.vault.redis.VaultPostgresManager postgres = net.milkbowl.vault.redis.VaultPostgresManager.getInstance();
         if (redis != null && redis.isOnline()) {
             redis.setBankBalance(name, 0.0);
+        } else if (postgres != null) {
+            postgres.setBankBalance(name, 0.0);
+            net.milkbowl.vault.Vault.getFailoverManager().saveBankBalance(name, 0.0);
         } else {
             net.milkbowl.vault.Vault.getFailoverManager().saveBankBalance(name, 0.0);
         }
@@ -805,8 +837,12 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         if (!nativeBanks && delegate != null) return delegate.deleteBank(name);
         bankBalances.remove(name.toLowerCase());
         VaultRedisManager redis = VaultRedisManager.getInstance();
+        net.milkbowl.vault.redis.VaultPostgresManager postgres = net.milkbowl.vault.redis.VaultPostgresManager.getInstance();
         if (redis != null && redis.isOnline()) {
             redis.setBankBalance(name, 0.0);
+        } else if (postgres != null) {
+            postgres.setBankBalance(name, 0.0);
+            net.milkbowl.vault.Vault.getFailoverManager().deleteBankAccount(name);
         } else {
             net.milkbowl.vault.Vault.getFailoverManager().deleteBankAccount(name);
         }
@@ -836,8 +872,12 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
             bal -= amount;
             bankBalances.put(name.toLowerCase(), bal);
             VaultRedisManager redis = VaultRedisManager.getInstance();
+            net.milkbowl.vault.redis.VaultPostgresManager postgres = net.milkbowl.vault.redis.VaultPostgresManager.getInstance();
             if (redis != null && redis.isOnline()) {
                 redis.setBankBalance(name, bal);
+            } else if (postgres != null) {
+                postgres.setBankBalance(name, bal);
+                net.milkbowl.vault.Vault.getFailoverManager().saveBankBalance(name, bal);
             } else {
                 net.milkbowl.vault.Vault.getFailoverManager().saveBankBalance(name, bal);
             }
@@ -853,8 +893,12 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         double bal = getBankBalanceNative(name) + amount;
         bankBalances.put(name.toLowerCase(), bal);
         VaultRedisManager redis = VaultRedisManager.getInstance();
+        net.milkbowl.vault.redis.VaultPostgresManager postgres = net.milkbowl.vault.redis.VaultPostgresManager.getInstance();
         if (redis != null && redis.isOnline()) {
             redis.setBankBalance(name, bal);
+        } else if (postgres != null) {
+            postgres.setBankBalance(name, bal);
+            net.milkbowl.vault.Vault.getFailoverManager().saveBankBalance(name, bal);
         } else {
             net.milkbowl.vault.Vault.getFailoverManager().saveBankBalance(name, bal);
         }
@@ -1002,6 +1046,16 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
                 if (!normalized.equals("default") && !currencies.contains(normalized)) {
                     currencies.add(normalized);
                 }
+            }
+        }
+        for (String c : customProviders.keySet()) {
+            if (!currencies.contains(c)) {
+                currencies.add(c);
+            }
+        }
+        for (String c : nativeRegisteredCurrencies.keySet()) {
+            if (!currencies.contains(c)) {
+                currencies.add(c);
             }
         }
         return currencies;
@@ -1436,6 +1490,9 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     @Override
     public String getCurrencySymbol(String currency) {
         if (currency == null || currency.equalsIgnoreCase("default")) return "$";
+        String key = currency.toLowerCase();
+        NativeCurrencyConfig cfg = nativeRegisteredCurrencies.get(key);
+        if (cfg != null) return cfg.symbol;
         if (currency.equalsIgnoreCase("gems")) return "💎";
         if (currency.equalsIgnoreCase("tokens")) return "🪙";
         if (currency.equalsIgnoreCase("coins")) return "🪙";
@@ -1570,14 +1627,27 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     }
 
     @Override
+    public boolean registerCurrency(String currency, String symbol, double startingBalance, double exchangeRate) {
+        if (currency == null || currency.trim().isEmpty()) return false;
+        String key = currency.toLowerCase().trim();
+        nativeRegisteredCurrencies.put(key, new NativeCurrencyConfig(key, symbol == null ? "$" : symbol, startingBalance, exchangeRate));
+        return true;
+    }
+
+    @Override
     public boolean unregisterCurrency(String currency) {
         if (currency == null) return false;
-        return customProviders.remove(currency.toLowerCase()) != null;
+        String key = currency.toLowerCase().trim();
+        boolean removedProvider = customProviders.remove(key) != null;
+        boolean removedNative = nativeRegisteredCurrencies.remove(key) != null;
+        return removedProvider || removedNative;
     }
 
     @Override
     public java.util.List<String> getRegisteredCustomCurrencies() {
-        return new java.util.ArrayList<>(customProviders.keySet());
+        java.util.Set<String> all = new java.util.HashSet<>(customProviders.keySet());
+        all.addAll(nativeRegisteredCurrencies.keySet());
+        return new java.util.ArrayList<>(all);
     }
 
     @Override

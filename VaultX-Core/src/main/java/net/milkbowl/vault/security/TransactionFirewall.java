@@ -167,6 +167,10 @@ public class TransactionFirewall implements VaultFirewallAPI {
         if (redis != null) {
             redis.freezePlayerInRedis(player.getUniqueId(), reason);
         }
+        net.milkbowl.vault.redis.VaultPostgresManager postgres = net.milkbowl.vault.redis.VaultPostgresManager.getInstance();
+        if (postgres != null) {
+            postgres.freezePlayer(player.getUniqueId(), reason);
+        }
     }
 
     public void freezePlayerLocal(UUID uuid, String reason) {

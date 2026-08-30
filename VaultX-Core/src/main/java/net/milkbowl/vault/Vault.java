@@ -208,6 +208,11 @@ public class Vault extends JavaPlugin {
             net.milkbowl.vault.redis.VaultRedisManager.getInstance().close();
         }
 
+        // Close Postgres Manager
+        if (net.milkbowl.vault.redis.VaultPostgresManager.getInstance() != null) {
+            net.milkbowl.vault.redis.VaultPostgresManager.getInstance().close();
+        }
+
         // Close Escrow Manager
         if (escrowManager != null) {
             escrowManager.close();
@@ -443,8 +448,20 @@ public class Vault extends JavaPlugin {
                     new SimplePie("chart_id", () -> "My value"));
         }
 
-        // Initialize Redis if enabled
-        if (getConfig().getBoolean("redis.enabled", false)) {
+        // Initialize Sync Provider (Redis or PostgreSQL)
+        String syncProvider = getConfig().getString("storage.sync-provider", "redis").toLowerCase();
+        if ("postgresql".equals(syncProvider) || "postgres".equals(syncProvider)) {
+            String host = getConfig().getString("storage.postgresql.host", "127.0.0.1");
+            int port = getConfig().getInt("storage.postgresql.port", 5432);
+            String db = getConfig().getString("storage.postgresql.database", "vaultx");
+            String username = getConfig().getString("storage.postgresql.username", "postgres");
+            String password = getConfig().getString("storage.postgresql.password", "");
+            String serverId = getConfig().getString("redis.server-id", "server-1");
+            String channel = getConfig().getString("storage.postgresql.channel", "vaultx_sync");
+            String properties = getConfig().getString("storage.postgresql.properties", "");
+
+            new net.milkbowl.vault.redis.VaultPostgresManager(this, host, port, db, username, password, serverId, channel, properties);
+        } else if (getConfig().getBoolean("redis.enabled", false)) {
             String host = getConfig().getString("redis.host", "127.0.0.1");
             int port = getConfig().getInt("redis.port", 6379);
             String password = getConfig().getString("redis.password", "");

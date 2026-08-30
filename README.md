@@ -8,7 +8,7 @@
 - **🏦 Bank Loans & Credit Scoring**: Dynamic credit score calculation (300-850), automated loans, and repayment schedules (`VaultLoanAPI`).
 - **📈 Inflation & Wealth Tax Control**: Global inflation multipliers, transaction taxes, and progressive wealth tax regulation (`VaultInflationAPI`).
 - **🏆 Milestones & Achievements**: Automatic balance milestone triggers and custom rewards (`VaultMilestoneAPI`).
-- **🧧 Digital Tokens & Crypto Wallets**: Pseudo-decentralized wallets and token mining (`VaultCryptoAPI`).
+- **🐘 PostgreSQL & LISTEN/NOTIFY Synchronization**: Native PostgreSQL storage support with HikariCP connection pooling and zero-Redis real-time cross-server sync via `LISTEN / NOTIFY`.
 - **🛡️ Memory Leak Proof**: Strict cache invalidation on player quit and complete thread pool shutdown on plugin disable.
 
 ---
@@ -142,7 +142,28 @@ public class QuickHookExample {
 }
 ```
 
-### 4. Leaderboard & Top Balances API
+### 4. Dynamic Programmatic Currency Registration (`VaultCurrencyRegistry`)
+
+Register new custom currencies dynamically via code without editing `config.yml`:
+
+```java
+import fr.skynex.vaultx.util.VaultXHook;
+
+public class CustomCurrencyRegistration {
+
+    public void registerMyCurrency() {
+        VaultXHook.getCurrencyRegistry().ifPresent(registry -> {
+            // Register a custom currency "crystals" with symbol "🔮", starting balance 100.0, exchange rate 2.5
+            boolean success = registry.registerCurrency("crystals", "🔮", 100.0, 2.5);
+            if (success) {
+                System.out.println("Crystals currency registered successfully via code!");
+            }
+        });
+    }
+}
+```
+
+### 5. Leaderboard & Top Balances API
 
 ```java
 import fr.skynex.vaultx.util.VaultXHook;

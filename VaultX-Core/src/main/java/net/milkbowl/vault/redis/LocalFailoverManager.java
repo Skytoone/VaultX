@@ -20,6 +20,7 @@ public class LocalFailoverManager {
     private final Plugin plugin;
     private final File dbFile;
     private final boolean isMySQL;
+    private final boolean isPostgreSQL;
     private final String jdbcUrl;
     private final String dbUser;
     private final String dbPass;
@@ -54,6 +55,7 @@ public class LocalFailoverManager {
         this.syncQueue = new LinkedBlockingQueue<>(maxQueueCapacity);
         String storageType = plugin.getConfig().getString("storage.type", "sqlite").toLowerCase();
         this.isMySQL = "mysql".equals(storageType) || "mariadb".equals(storageType);
+        this.isPostgreSQL = "postgresql".equals(storageType) || "postgres".equals(storageType);
         
         if (isMySQL) {
             this.dbFile = null;
@@ -84,6 +86,31 @@ public class LocalFailoverManager {
             config.addDataSourceProperty("prepStmtCacheSize", "250");
             config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
             config.addDataSourceProperty("useServerPrepStmts", "true");
+            
+            this.dataSource = new com.zaxxer.hikari.HikariDataSource(config);
+        } else if (isPostgreSQL) {
+            this.dbFile = null;
+            String host = plugin.getConfig().getString("storage.postgresql.host", "127.0.0.1");
+            int port = plugin.getConfig().getInt("storage.postgresql.port", 5432);
+            String db = plugin.getConfig().getString("storage.postgresql.database", "vaultx");
+            this.dbUser = plugin.getConfig().getString("storage.postgresql.username", "postgres");
+            this.dbPass = plugin.getConfig().getString("storage.postgresql.password", "");
+            String props = plugin.getConfig().getString("storage.postgresql.properties", "");
+            
+            this.jdbcUrl = "jdbc:postgresql://" + host + ":" + port + "/" + db + (props.isEmpty() ? "" : "?" + props);
+            registerDriver("postgresql");
+            
+            com.zaxxer.hikari.HikariConfig config = new com.zaxxer.hikari.HikariConfig();
+            config.setJdbcUrl(jdbcUrl);
+            config.setUsername(dbUser);
+            config.setPassword(dbPass);
+            config.setMaximumPoolSize(MAX_POOL_SIZE);
+            config.setMinimumIdle(Math.max(2, MAX_POOL_SIZE / 4));
+            config.setConnectionTimeout(2000);
+            
+            config.addDataSourceProperty("cachePrepStmts", "true");
+            config.addDataSourceProperty("prepStmtCacheSize", "250");
+            config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
             
             this.dataSource = new com.zaxxer.hikari.HikariDataSource(config);
         } else {
@@ -122,7 +149,9 @@ public class LocalFailoverManager {
 
     private void registerDriver(String type) {
         String driver;
-        if ("mariadb".equals(type) && hasClass("org.mariadb.jdbc.Driver")) {
+        if ("postgresql".equals(type) || "postgres".equals(type)) {
+            driver = "org.postgresql.Driver";
+        } else if ("mariadb".equals(type) && hasClass("org.mariadb.jdbc.Driver")) {
             driver = "org.mariadb.jdbc.Driver";
         } else if ("mysql".equals(type) || "mariadb".equals(type)) {
             if (hasClass("com.mysql.cj.jdbc.Driver")) {
@@ -215,8 +244,8 @@ public class LocalFailoverManager {
     private void initDatabase() {
         executeDatabaseOperation(conn -> {
             try (Statement stmt = conn.createStatement()) {
-                String autoIncrementKey = isMySQL ? "BIGINT PRIMARY KEY AUTO_INCREMENT" : "INTEGER PRIMARY KEY AUTOINCREMENT";
-                String bigintType = isMySQL ? "BIGINT" : "LONG";
+                String autoIncrementKey = isMySQL ? "BIGINT PRIMARY KEY AUTO_INCREMENT" : (isPostgreSQL ? "BIGSERIAL PRIMARY KEY" : "INTEGER PRIMARY KEY AUTOINCREMENT");
+                String bigintType = (isMySQL || isPostgreSQL) ? "BIGINT" : "LONG";
 
                 // Table for pending sync messages
                 stmt.execute("CREATE TABLE IF NOT EXISTS pending_syncs (" +
