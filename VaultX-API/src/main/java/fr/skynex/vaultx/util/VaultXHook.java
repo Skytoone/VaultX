@@ -27,6 +27,7 @@ import net.milkbowl.vault.economy.VaultAuctionAPI;
 import net.milkbowl.vault.economy.VaultStakingAPI;
 import net.milkbowl.vault.economy.VaultTaxAPI;
 import net.milkbowl.vault.economy.VaultCreditAPI;
+import net.milkbowl.vault.economy.VaultSnapshotAPI;
 
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.RegisteredServiceProvider;
@@ -250,6 +251,14 @@ public final class VaultXHook {
      */
     public static Optional<VaultCreditAPI> getCreditAPI() {
         RegisteredServiceProvider<VaultCreditAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultCreditAPI.class);
+        return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
+    }
+
+    /**
+     * @return VaultX VaultSnapshotAPI service provider if available.
+     */
+    public static Optional<VaultSnapshotAPI> getSnapshotAPI() {
+        RegisteredServiceProvider<VaultSnapshotAPI> rsp = Bukkit.getServicesManager().getRegistration(VaultSnapshotAPI.class);
         return rsp != null ? Optional.ofNullable(rsp.getProvider()) : Optional.empty();
     }
 }

@@ -168,6 +168,10 @@ public class Vault extends JavaPlugin {
         return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
     }
 
+    public static net.milkbowl.vault.economy.VaultSnapshotAPI getSnapshotAPI() {
+        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+    }
+
     public static net.milkbowl.vault.economy.VaultAuditAPI getAuditAPI() {
         return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
     }
@@ -386,6 +390,7 @@ public class Vault extends JavaPlugin {
             sm.register(net.milkbowl.vault.economy.VaultInflationAPI.class, primaryEcon, this, ServicePriority.Normal);
             sm.register(net.milkbowl.vault.economy.VaultMilestoneAPI.class, primaryEcon, this, ServicePriority.Normal);
             sm.register(net.milkbowl.vault.economy.VaultCryptoAPI.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultSnapshotAPI.class, primaryEcon, this, ServicePriority.Normal);
             sm.register(net.milkbowl.vault.economy.VaultAsyncEconomy.class, primaryEcon, this, ServicePriority.Normal);
         }
 

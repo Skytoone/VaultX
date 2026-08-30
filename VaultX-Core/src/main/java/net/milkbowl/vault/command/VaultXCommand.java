@@ -793,6 +793,86 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
 
         String action = args[1].toLowerCase();
 
+        if (action.equalsIgnoreCase("snapshot")) {
+            net.milkbowl.vault.economy.VaultSnapshotAPI snapshotAPI = Vault.getSnapshotAPI();
+            if (snapshotAPI == null) {
+                sender.sendMessage("§cSnapshot API is not available.");
+                return;
+            }
+
+            if (args.length < 3) {
+                sender.sendMessage("§cUsage: /vaultx admin snapshot <create [label] | list | rollback <id> [player] | delete <id>>");
+                return;
+            }
+
+            String sub = args[2].toLowerCase();
+            if (sub.equals("create")) {
+                String snapLabel = args.length >= 4 ? String.join(" ", java.util.Arrays.copyOfRange(args, 3, args.length)) : "Manual Admin Snapshot";
+                sender.sendMessage("§eCreating atomic economy snapshot...");
+                snapshotAPI.createSnapshotAsync(snapLabel).thenAccept(snap -> {
+                    sender.sendMessage("§a✔ Snapshot created! ID: §e" + snap.snapshotId() + " §7(" + snap.totalAccountsCaptured() + " accounts, Net Worth: $" + String.format("%.2f", snap.totalNetWorth()) + ")");
+                });
+            } else if (sub.equals("list")) {
+                snapshotAPI.getSnapshotsAsync(10).thenAccept(list -> {
+                    if (list.isEmpty()) {
+                        sender.sendMessage("§cNo snapshots found.");
+                        return;
+                    }
+                    sender.sendMessage("§6--- VaultX Economy Snapshots ---");
+                    for (var snap : list) {
+                        sender.sendMessage("§e" + snap.snapshotId() + " §7- " + snap.label() + " §8(" + snap.totalAccountsCaptured() + " accounts, $" + String.format("%.2f", snap.totalNetWorth()) + ")");
+                    }
+                });
+            } else if (sub.equals("rollback")) {
+                if (args.length < 4) {
+                    sender.sendMessage("§cUsage: /vaultx admin snapshot rollback <snapshotId> [player]");
+                    return;
+                }
+                String snapId = args[3];
+                if (args.length >= 5) {
+                    String targetPlayer = args[4];
+                    OfflinePlayer target = resolvePlayerFast(targetPlayer);
+                    if (target == null) {
+                        sender.sendMessage("§cPlayer not found.");
+                        return;
+                    }
+                    sender.sendMessage("§eRolling back player " + targetPlayer + " to snapshot " + snapId + "...");
+                    snapshotAPI.restorePlayerSnapshotAsync(target.getUniqueId(), snapId).thenAccept(success -> {
+                        if (success) {
+                            sender.sendMessage("§a✔ Successfully restored player " + targetPlayer + " to snapshot " + snapId + "!");
+                        } else {
+                            sender.sendMessage("§cFailed to restore player snapshot. Snapshot ID or player data not found.");
+                        }
+                    });
+                } else {
+                    sender.sendMessage("§eRolling back ENTIRE SERVER economy to snapshot " + snapId + "...");
+                    snapshotAPI.restoreServerSnapshotAsync(snapId).thenAccept(success -> {
+                        if (success) {
+                            sender.sendMessage("§a✔ SERVER ECONOMY ROLLBACK COMPLETE! All account balances restored to snapshot " + snapId + "!");
+                        } else {
+                            sender.sendMessage("§cFailed to restore server snapshot. Invalid Snapshot ID.");
+                        }
+                    });
+                }
+            } else if (sub.equals("delete")) {
+                if (args.length < 4) {
+                    sender.sendMessage("§cUsage: /vaultx admin snapshot delete <snapshotId>");
+                    return;
+                }
+                String snapId = args[3];
+                snapshotAPI.deleteSnapshotAsync(snapId).thenAccept(success -> {
+                    if (success) {
+                        sender.sendMessage("§a✔ Deleted snapshot " + snapId);
+                    } else {
+                        sender.sendMessage("§cFailed to delete snapshot.");
+                    }
+                });
+            } else {
+                sender.sendMessage("§cUsage: /vaultx admin snapshot <create [label] | list | rollback <id> [player] | delete <id>>");
+            }
+            return;
+        }
+
         if (action.equalsIgnoreCase("tax")) {
             if (args.length < 5 || !args[2].equalsIgnoreCase("set")) {
                 sender.sendMessage(getMsg("commands.admin.tax.usage", "&cUsage: /vaultx admin tax set <payday/pay/exchange> <percent>"));

@@ -11,9 +11,13 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import net.milkbowl.vault.economy.VaultSnapshotAPI;
+import net.milkbowl.vault.economy.VaultSnapshotAPI.EconomySnapshot;
 
 public class LocalFailoverManager {
 
@@ -411,6 +415,21 @@ public class LocalFailoverManager {
                 stmt.execute("CREATE TABLE IF NOT EXISTS discord_accounts (" +
                         "uuid VARCHAR(36) PRIMARY KEY, " +
                         "discord_tag VARCHAR(64) NOT NULL)");
+
+                // Table for economy snapshots
+                stmt.execute("CREATE TABLE IF NOT EXISTS economy_snapshots (" +
+                        "snapshot_id VARCHAR(64) PRIMARY KEY, " +
+                        "label VARCHAR(128) NOT NULL, " +
+                        "timestamp " + bigintType + " NOT NULL, " +
+                        "total_accounts INT NOT NULL, " +
+                        "total_net_worth DOUBLE NOT NULL)");
+
+                stmt.execute("CREATE TABLE IF NOT EXISTS snapshot_balances (" +
+                        "snapshot_id VARCHAR(64) NOT NULL, " +
+                        "uuid VARCHAR(36) NOT NULL, " +
+                        "currency VARCHAR(32) NOT NULL, " +
+                        "balance DOUBLE NOT NULL, " +
+                        "PRIMARY KEY (snapshot_id, uuid, currency))");
 
                 // Schema migrations
                 try {
@@ -2573,6 +2592,123 @@ public class LocalFailoverManager {
             }
             return -1;
         }, -1, "Failed to get player rank");
+    }
+
+    public boolean createSnapshot(String snapshotId, String label, long timestamp, int totalAccounts, double totalNetWorth, Map<UUID, Map<String, Double>> allBalances) {
+        String insertSnapshot = "INSERT INTO economy_snapshots (snapshot_id, label, timestamp, total_accounts, total_net_worth) VALUES (?, ?, ?, ?, ?)";
+        String insertBalance = "INSERT INTO snapshot_balances (snapshot_id, uuid, currency, balance) VALUES (?, ?, ?, ?)";
+
+        return executeDatabaseQuery(conn -> {
+            boolean origAutoCommit = conn.getAutoCommit();
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement pstmt = conn.prepareStatement(insertSnapshot)) {
+                    pstmt.setString(1, snapshotId);
+                    pstmt.setString(2, label != null ? label : "Snapshot " + snapshotId);
+                    pstmt.setLong(3, timestamp);
+                    pstmt.setInt(4, totalAccounts);
+                    pstmt.setDouble(5, totalNetWorth);
+                    pstmt.executeUpdate();
+                }
+
+                try (PreparedStatement pstmt = conn.prepareStatement(insertBalance)) {
+                    for (Map.Entry<UUID, Map<String, Double>> entry : allBalances.entrySet()) {
+                        String uStr = entry.getKey().toString();
+                        for (Map.Entry<String, Double> bEntry : entry.getValue().entrySet()) {
+                            pstmt.setString(1, snapshotId);
+                            pstmt.setString(2, uStr);
+                            pstmt.setString(3, bEntry.getKey().toLowerCase());
+                            pstmt.setDouble(4, bEntry.getValue());
+                            pstmt.addBatch();
+                        }
+                    }
+                    pstmt.executeBatch();
+                }
+                conn.commit();
+                return true;
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(origAutoCommit);
+            }
+        }, false, "Failed to save economy snapshot");
+    }
+
+    public List<EconomySnapshot> getSnapshotsFromDb(int limit) {
+        String query = "SELECT snapshot_id, label, timestamp, total_accounts, total_net_worth FROM economy_snapshots ORDER BY timestamp DESC LIMIT ?";
+        List<EconomySnapshot> res = executeDatabaseQuery(conn -> {
+            List<EconomySnapshot> list = new ArrayList<>();
+            try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                pstmt.setInt(1, limit > 0 ? limit : 50);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    while (rs.next()) {
+                        list.add(new EconomySnapshot(
+                            rs.getString("snapshot_id"),
+                            rs.getLong("timestamp"),
+                            rs.getString("label"),
+                            rs.getInt("total_accounts"),
+                            rs.getDouble("total_net_worth")
+                        ));
+                    }
+                }
+            }
+            return list;
+        }, new ArrayList<EconomySnapshot>(), "Failed to get snapshots from DB");
+        return res;
+    }
+
+    public Map<UUID, Map<String, Double>> getSnapshotBalances(String snapshotId) {
+        String query = "SELECT uuid, currency, balance FROM snapshot_balances WHERE snapshot_id = ?";
+        return executeDatabaseQuery(conn -> {
+            Map<UUID, Map<String, Double>> map = new HashMap<>();
+            try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                pstmt.setString(1, snapshotId);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    while (rs.next()) {
+                        try {
+                            UUID u = UUID.fromString(rs.getString("uuid"));
+                            String cur = rs.getString("currency").toLowerCase();
+                            double bal = rs.getDouble("balance");
+                            map.computeIfAbsent(u, k -> new HashMap<>()).put(cur, bal);
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
+            return map;
+        }, new HashMap<>(), "Failed to load snapshot balances");
+    }
+
+    public Map<String, Double> getPlayerSnapshotBalances(UUID uuid, String snapshotId) {
+        String query = "SELECT currency, balance FROM snapshot_balances WHERE snapshot_id = ? AND uuid = ?";
+        return executeDatabaseQuery(conn -> {
+            Map<String, Double> map = new HashMap<>();
+            try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                pstmt.setString(1, snapshotId);
+                pstmt.setString(2, uuid.toString());
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    while (rs.next()) {
+                        map.put(rs.getString("currency").toLowerCase(), rs.getDouble("balance"));
+                    }
+                }
+            }
+            return map;
+        }, new HashMap<>(), "Failed to load player snapshot balances");
+    }
+
+    public boolean deleteSnapshotFromDb(String snapshotId) {
+        String del1 = "DELETE FROM economy_snapshots WHERE snapshot_id = ?";
+        String del2 = "DELETE FROM snapshot_balances WHERE snapshot_id = ?";
+        return executeDatabaseQuery(conn -> {
+            try (PreparedStatement p1 = conn.prepareStatement(del1);
+                 PreparedStatement p2 = conn.prepareStatement(del2)) {
+                p1.setString(1, snapshotId);
+                p1.executeUpdate();
+                p2.setString(1, snapshotId);
+                p2.executeUpdate();
+                return true;
+            }
+        }, false, "Failed to delete snapshot");
     }
 }
 

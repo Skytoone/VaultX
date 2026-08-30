@@ -1,6 +1,7 @@
 package net.milkbowl.vault.economy;
 
 import java.util.Map;
+import java.util.HashMap;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -28,7 +29,7 @@ import net.milkbowl.vault.util.StripedLock;
  * Redis cross-server synchronization, and Multi-Currency support.
  */
 @SuppressWarnings("deprecation")
-public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy, VaultLeaderboardAPI, VaultBatchTransactionAPI, VaultFormatAPI, VaultMailboxAPI, VaultBoosterAPI, VaultLockAPI, VaultSubscriptionAPI, VaultAnalyticsAPI, VaultCurrencyRegistry, VaultAuditAPI, VaultCheckAPI, VaultLoanAPI, VaultInflationAPI, VaultMilestoneAPI, VaultCryptoAPI, VaultAuctionAPI, VaultStakingAPI, VaultTaxAPI, VaultCreditAPI {
+public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy, VaultLeaderboardAPI, VaultBatchTransactionAPI, VaultFormatAPI, VaultMailboxAPI, VaultBoosterAPI, VaultLockAPI, VaultSubscriptionAPI, VaultAnalyticsAPI, VaultCurrencyRegistry, VaultAuditAPI, VaultCheckAPI, VaultLoanAPI, VaultInflationAPI, VaultMilestoneAPI, VaultCryptoAPI, VaultAuctionAPI, VaultStakingAPI, VaultTaxAPI, VaultCreditAPI, VaultSnapshotAPI {
 
     private final Economy delegate;
     private final boolean useCache;
@@ -2097,6 +2098,131 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
             double bal = getBalance(player);
             int score = (int) Math.min(850, Math.max(300, 600 + (bal / 1000.0)));
             return score;
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultSnapshotAPI.EconomySnapshot> createSnapshotAsync(String label) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            String snapshotId = "snap_" + System.currentTimeMillis() + "_" + java.util.UUID.randomUUID().toString().substring(0, 6);
+            long timestamp = System.currentTimeMillis();
+
+            Map<UUID, Map<String, Double>> snapshotBalances = new HashMap<>();
+            java.util.List<String> currencies = getSupportedCurrencies();
+
+            for (Map.Entry<UUID, Map<String, CacheEntry>> entry : balanceCache.entrySet()) {
+                UUID uuid = entry.getKey();
+                for (Map.Entry<String, CacheEntry> cEntry : entry.getValue().entrySet()) {
+                    snapshotBalances.computeIfAbsent(uuid, k -> new HashMap<>()).put(cEntry.getKey().toLowerCase(), cEntry.getValue().balance);
+                }
+            }
+
+            for (Map.Entry<UUID, Map<String, CacheEntry>> entry : offlineBalanceCache.entrySet()) {
+                UUID uuid = entry.getKey();
+                for (Map.Entry<String, CacheEntry> cEntry : entry.getValue().entrySet()) {
+                    snapshotBalances.computeIfAbsent(uuid, k -> new HashMap<>()).putIfAbsent(cEntry.getKey().toLowerCase(), cEntry.getValue().balance);
+                }
+            }
+
+            net.milkbowl.vault.redis.LocalFailoverManager failover = net.milkbowl.vault.Vault.getFailoverManager();
+            if (failover != null) {
+                for (String curr : currencies) {
+                    Map<UUID, Double> topMap = failover.getTopBalances(curr, 10000);
+                    if (topMap != null) {
+                        for (Map.Entry<UUID, Double> tEntry : topMap.entrySet()) {
+                            snapshotBalances.computeIfAbsent(tEntry.getKey(), k -> new HashMap<>()).putIfAbsent(curr.toLowerCase(), tEntry.getValue());
+                        }
+                    }
+                }
+            }
+
+            int totalAccounts = snapshotBalances.size();
+            double totalNetWorth = 0.0;
+            for (Map<String, Double> pBals : snapshotBalances.values()) {
+                for (Double val : pBals.values()) {
+                    if (val != null && val > 0) {
+                        totalNetWorth += val;
+                    }
+                }
+            }
+
+            if (failover != null) {
+                failover.createSnapshot(snapshotId, label != null ? label : "Snapshot " + snapshotId, timestamp, totalAccounts, totalNetWorth, snapshotBalances);
+            }
+
+            return new VaultSnapshotAPI.EconomySnapshot(snapshotId, timestamp, label != null ? label : "Snapshot " + snapshotId, totalAccounts, totalNetWorth);
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Boolean> restoreServerSnapshotAsync(String snapshotId) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (snapshotId == null) return false;
+            net.milkbowl.vault.redis.LocalFailoverManager failover = net.milkbowl.vault.Vault.getFailoverManager();
+            if (failover == null) return false;
+
+            Map<UUID, Map<String, Double>> snapshotBalances = failover.getSnapshotBalances(snapshotId);
+            if (snapshotBalances.isEmpty()) return false;
+
+            balanceCache.clear();
+            offlineBalanceCache.clear();
+
+            for (Map.Entry<UUID, Map<String, Double>> entry : snapshotBalances.entrySet()) {
+                UUID playerUuid = entry.getKey();
+                OfflinePlayer op = Bukkit.getOfflinePlayer(playerUuid);
+                for (Map.Entry<String, Double> bEntry : entry.getValue().entrySet()) {
+                    String curr = bEntry.getKey();
+                    double bal = bEntry.getValue();
+                    saveCustomCurrencyBalance(op, curr, bal);
+                }
+            }
+
+            return true;
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Boolean> restorePlayerSnapshotAsync(UUID playerUuid, String snapshotId) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (playerUuid == null || snapshotId == null) return false;
+            net.milkbowl.vault.redis.LocalFailoverManager failover = net.milkbowl.vault.Vault.getFailoverManager();
+            if (failover == null) return false;
+
+            Map<String, Double> playerBals = failover.getPlayerSnapshotBalances(playerUuid, snapshotId);
+            if (playerBals.isEmpty()) return false;
+
+            balanceCache.remove(playerUuid);
+            offlineBalanceCache.remove(playerUuid);
+
+            OfflinePlayer op = Bukkit.getOfflinePlayer(playerUuid);
+            for (Map.Entry<String, Double> entry : playerBals.entrySet()) {
+                saveCustomCurrencyBalance(op, entry.getKey(), entry.getValue());
+            }
+
+            return true;
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<java.util.List<VaultSnapshotAPI.EconomySnapshot>> getSnapshotsAsync(int limit) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            net.milkbowl.vault.redis.LocalFailoverManager failover = net.milkbowl.vault.Vault.getFailoverManager();
+            if (failover != null) {
+                return failover.getSnapshotsFromDb(limit);
+            }
+            return java.util.Collections.emptyList();
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Boolean> deleteSnapshotAsync(String snapshotId) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (snapshotId == null) return false;
+            net.milkbowl.vault.redis.LocalFailoverManager failover = net.milkbowl.vault.Vault.getFailoverManager();
+            if (failover != null) {
+                return failover.deleteSnapshotFromDb(snapshotId);
+            }
+            return false;
         }, asyncExecutor);
     }
 }

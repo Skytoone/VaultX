@@ -38,4 +38,5 @@ public final class VaultXHook {
     public static Optional<VaultStakingAPI> getStakingAPI() { return fr.skynex.vaultx.util.VaultXHook.getStakingAPI(); }
     public static Optional<VaultTaxAPI> getTaxAPI() { return fr.skynex.vaultx.util.VaultXHook.getTaxAPI(); }
     public static Optional<VaultCreditAPI> getCreditAPI() { return fr.skynex.vaultx.util.VaultXHook.getCreditAPI(); }
+    public static Optional<VaultSnapshotAPI> getSnapshotAPI() { return fr.skynex.vaultx.util.VaultXHook.getSnapshotAPI(); }
 }
