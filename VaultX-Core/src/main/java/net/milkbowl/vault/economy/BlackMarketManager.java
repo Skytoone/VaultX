@@ -19,18 +19,19 @@ import org.bukkit.Bukkit;
 import net.milkbowl.vault.economy.VaultBlackMarketAPI;
 import net.milkbowl.vault.economy.events.VaultBlackMarketLaunderEvent;
 
+import net.milkbowl.vault.util.StripedLock;
+
 public class BlackMarketManager implements VaultBlackMarketAPI {
 
     private final Plugin plugin;
     private final SecureRandom random = new SecureRandom();
     private final Map<UUID, Double> dirtyBalances = new ConcurrentHashMap<>();
-    // Per-player lock to prevent race conditions on concurrent launder attempts
-    private final Map<UUID, Object> playerLocks = new ConcurrentHashMap<>();
+    private final StripedLock stripedLock = new StripedLock();
 
     private static final String DIRTY_LORE_MARKER = "§8[vaultx:dirty_money]";
 
-    private Object getPlayerLock(UUID uuid) {
-        return playerLocks.computeIfAbsent(uuid, k -> new Object());
+    private java.util.concurrent.locks.ReentrantLock getPlayerLock(UUID uuid) {
+        return stripedLock.getLock(uuid);
     }
 
     public static class LaunderingResult extends VaultBlackMarketAPI.LaunderingResult {
@@ -249,13 +250,11 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
 
     public void cleanupPlayer(UUID uuid) {
         if (uuid != null) {
-            playerLocks.remove(uuid);
             dirtyBalances.remove(uuid);
         }
     }
 
     public void close() {
         dirtyBalances.clear();
-        playerLocks.clear();
     }
 }

@@ -13,6 +13,7 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 
 import net.milkbowl.vault.redis.VaultRedisManager;
+import net.milkbowl.vault.util.StripedLock;
 
 /**
  * Enterprise-grade high performance decorator wrapper for Vault Economy
@@ -37,15 +38,8 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     private final long onlineCacheTtlMs;
     private final java.util.concurrent.ExecutorService asyncExecutor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
 
-    // Cache entry structure for player balances
-    private static class CacheEntry {
-        final double balance;
-        final long timestamp;
-        CacheEntry(double balance, long timestamp) {
-            this.balance = balance;
-            this.timestamp = timestamp;
-        }
-    }
+    // Cache entry record for player balances (Java 21 zero-boilerplate)
+    private record CacheEntry(double balance, long timestamp) {}
 
     // Thread-safe cache for high-throughput operations. Key format: Map<UUID, Map<currency, CacheEntry>>
     private final Map<UUID, Map<String, CacheEntry>> balanceCache = new ConcurrentHashMap<>();
@@ -80,7 +74,7 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     private final Map<String, Long> globalBoosterExpirations = new ConcurrentHashMap<>();
 
     // Lock, Subscription and Registry cache
-    private final Map<UUID, java.util.concurrent.locks.ReentrantLock> playerLocks = new ConcurrentHashMap<>();
+    private final StripedLock stripedLock = new StripedLock();
     private final Map<String, SubscriptionDetails> activeSubscriptions = new ConcurrentHashMap<>();
     private final Map<String, CustomCurrencyProvider> customProviders = new ConcurrentHashMap<>();
  
@@ -134,7 +128,6 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
             rateLimitWindow.entrySet().removeIf(e -> (now - e.getValue()) > 1000L);
             rateLimitCount.entrySet().removeIf(e -> !rateLimitWindow.containsKey(e.getKey()));
             rateLimitBlock.entrySet().removeIf(e -> now > e.getValue());
-            playerLocks.entrySet().removeIf(e -> Bukkit.getPlayer(e.getKey()) == null && !e.getValue().isLocked());
         }, 300L, 300L);
         preloadBanks();
     }
@@ -256,7 +249,6 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
             rateLimitCount.remove(uuid);
             rateLimitBlock.remove(uuid);
             negativeAccountCache.remove(uuid);
-            playerLocks.remove(uuid);
             cryptoWallets.remove(uuid);
             if (useCache) {
                 balanceCache.remove(uuid);
@@ -282,7 +274,6 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         rateLimitCount.clear();
         rateLimitBlock.clear();
         bankBalances.clear();
-        playerLocks.clear();
         globalBoosters.clear();
         globalBoosterExpirations.clear();
         activeSubscriptions.clear();
@@ -392,7 +383,6 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         balanceCache.remove(uuid);
         offlineBalanceCache.remove(uuid);
         negativeAccountCache.remove(uuid);
-        playerLocks.remove(uuid);
         rateLimitWindow.remove(uuid);
         rateLimitCount.remove(uuid);
         rateLimitBlock.remove(uuid);
@@ -1484,7 +1474,7 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     @Override
     public void executeWithLock(OfflinePlayer player, Runnable action) {
         if (player == null || action == null) return;
-        java.util.concurrent.locks.ReentrantLock lock = playerLocks.computeIfAbsent(player.getUniqueId(), k -> new java.util.concurrent.locks.ReentrantLock());
+        java.util.concurrent.locks.ReentrantLock lock = stripedLock.getLock(player.getUniqueId());
         lock.lock();
         try {
             action.run();
@@ -1496,7 +1486,7 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
     @Override
     public <T> T computeWithLock(OfflinePlayer player, java.util.function.Supplier<T> supplier) {
         if (player == null || supplier == null) return null;
-        java.util.concurrent.locks.ReentrantLock lock = playerLocks.computeIfAbsent(player.getUniqueId(), k -> new java.util.concurrent.locks.ReentrantLock());
+        java.util.concurrent.locks.ReentrantLock lock = stripedLock.getLock(player.getUniqueId());
         lock.lock();
         try {
             return supplier.get();

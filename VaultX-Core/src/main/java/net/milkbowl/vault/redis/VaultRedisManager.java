@@ -50,6 +50,8 @@ public class VaultRedisManager {
             "redis.call('incrbyfloat', KEYS[2], diff)\n" +
             "return 1";
 
+    private String updateScriptSha1 = null;
+
     private void updateLeaderboardAndStats(redis.clients.jedis.Jedis jedis, String curr, String member, double score) {
         String leaderboardKey = "vaultx:leaderboard:" + curr;
         String totalMoneyKey = "vaultx:stats:total_money:" + curr;
@@ -58,7 +60,17 @@ public class VaultRedisManager {
         List<String> keys = java.util.Arrays.asList(leaderboardKey, totalMoneyKey, accountsCountKey);
         List<String> args = java.util.Arrays.asList(member, String.valueOf(score));
 
-        jedis.eval(UPDATE_BALANCE_STATS_LUA, keys, args);
+        try {
+            if (updateScriptSha1 == null) {
+                updateScriptSha1 = jedis.scriptLoad(UPDATE_BALANCE_STATS_LUA);
+            }
+            jedis.evalsha(updateScriptSha1, keys, args);
+        } catch (Exception e) {
+            try {
+                updateScriptSha1 = jedis.scriptLoad(UPDATE_BALANCE_STATS_LUA);
+            } catch (Exception ignored) {}
+            jedis.eval(UPDATE_BALANCE_STATS_LUA, keys, args);
+        }
     }
 
     private JedisPubSub pubSub;
