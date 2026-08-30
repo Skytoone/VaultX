@@ -6,7 +6,12 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import net.milkbowl.vault.economy.events.VaultTransactionEvent;
 import net.milkbowl.vault.economy.events.VaultTransactionEvent.TransactionType;
+import net.milkbowl.vault.economy.events.VaultCryptoMineEvent;
+import net.milkbowl.vault.economy.events.VaultInflationUpdateEvent;
 import net.milkbowl.vault.economy.events.VaultPreTransactionEvent;
+import net.milkbowl.vault.economy.events.VaultBankTransactionEvent;
+import net.milkbowl.vault.economy.events.VaultBankTransactionEvent.BankTransactionType;
+import net.milkbowl.vault.economy.events.VaultMilestoneReachedEvent;
 
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
@@ -553,6 +558,14 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         }
 
         double currentBalance = (currency == null) ? getBalance(player) : getCurrencyBalance(player, currency);
+        if (VaultPreTransactionEvent.getHandlerList().getRegisteredListeners().length > 0) {
+            VaultPreTransactionEvent.TransactionType preType = (eventType == TransactionType.DEPOSIT) ? VaultPreTransactionEvent.TransactionType.DEPOSIT : VaultPreTransactionEvent.TransactionType.WITHDRAW;
+            VaultPreTransactionEvent preEvent = new VaultPreTransactionEvent(player, amount, currency, preType, findCallerPlugin());
+            Bukkit.getPluginManager().callEvent(preEvent);
+            if (preEvent.isCancelled()) {
+                return new EconomyResponse(0, currentBalance, EconomyResponse.ResponseType.FAILURE, preEvent.getCancelReason());
+            }
+        }
         if (net.milkbowl.vault.Vault.getFirewall() != null) {
             if (!net.milkbowl.vault.Vault.getFirewall().checkTransaction(player, amount, type, currentBalance)) {
                 return new EconomyResponse(0, currentBalance, EconomyResponse.ResponseType.FAILURE, "Transaction blocked by safety firewall");
@@ -778,6 +791,7 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         } else {
             net.milkbowl.vault.Vault.getFailoverManager().saveBankBalance(name, 0.0);
         }
+        Bukkit.getPluginManager().callEvent(new VaultBankTransactionEvent(name, player, 0.0, BankTransactionType.CREATE_BANK, 0.0));
         return new EconomyResponse(0, 0, EconomyResponse.ResponseType.SUCCESS, "");
     }
 
@@ -796,6 +810,7 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         } else {
             net.milkbowl.vault.Vault.getFailoverManager().deleteBankAccount(name);
         }
+        Bukkit.getPluginManager().callEvent(new VaultBankTransactionEvent(name, (String) null, 0.0, BankTransactionType.DELETE_BANK, 0.0));
         return new EconomyResponse(0, 0, EconomyResponse.ResponseType.SUCCESS, "");
     }
 
@@ -826,6 +841,7 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
             } else {
                 net.milkbowl.vault.Vault.getFailoverManager().saveBankBalance(name, bal);
             }
+            Bukkit.getPluginManager().callEvent(new VaultBankTransactionEvent(name, (String) null, amount, BankTransactionType.WITHDRAW, bal));
             return new EconomyResponse(amount, bal, EconomyResponse.ResponseType.SUCCESS, "");
         }
         return new EconomyResponse(0, bal, EconomyResponse.ResponseType.FAILURE, "Not enough funds");
@@ -842,6 +858,7 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         } else {
             net.milkbowl.vault.Vault.getFailoverManager().saveBankBalance(name, bal);
         }
+        Bukkit.getPluginManager().callEvent(new VaultBankTransactionEvent(name, (String) null, amount, BankTransactionType.DEPOSIT, bal));
         return new EconomyResponse(amount, bal, EconomyResponse.ResponseType.SUCCESS, "");
     }
 
@@ -1697,7 +1714,11 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
 
     @Override
     public void setInflationRate(String currency, double multiplier) {
-        if (currency != null) inflationRates.put(currency, multiplier);
+        if (currency != null) {
+            double old = inflationRates.getOrDefault(currency, 1.0);
+            inflationRates.put(currency, multiplier);
+            Bukkit.getPluginManager().callEvent(new VaultInflationUpdateEvent(currency, old, multiplier, 0.0, 0.0));
+        }
     }
 
     @Override
@@ -1739,7 +1760,13 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
         }
         Milestone m = registeredMilestones.get(milestoneId);
         if (m == null) return java.util.concurrent.CompletableFuture.completedFuture(false);
-        return java.util.concurrent.CompletableFuture.supplyAsync(() -> getBalance(player) >= m.requiredBalance(), asyncExecutor);
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            boolean reached = getBalance(player) >= m.requiredBalance();
+            if (reached) {
+                Bukkit.getPluginManager().callEvent(new VaultMilestoneReachedEvent(player, m.currency(), m.requiredBalance(), ""));
+            }
+            return reached;
+        }, asyncExecutor);
     }
 
     // ==========================================
@@ -1765,6 +1792,8 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
             if (player != null) {
                 cryptoWallets.computeIfAbsent(player.getUniqueId(), k -> new ConcurrentHashMap<>()).merge(cryptoName, amount, Double::sum);
             }
+            double difficulty = plugin.getConfig().getDouble("crypto.difficulty", 1.0);
+            Bukkit.getPluginManager().callEvent(new VaultCryptoMineEvent(player, cryptoName, amount, difficulty));
             return new EconomyResponse(amount, amount, EconomyResponse.ResponseType.SUCCESS, "Mined " + amount + " " + cryptoName);
         }, asyncExecutor);
     }

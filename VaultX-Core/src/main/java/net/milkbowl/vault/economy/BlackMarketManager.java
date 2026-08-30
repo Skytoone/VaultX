@@ -16,7 +16,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.bukkit.OfflinePlayer;
 import org.bukkit.Bukkit;
-import net.milkbowl.vault.economy.VaultBlackMarketAPI;
 import net.milkbowl.vault.economy.events.VaultBlackMarketLaunderEvent;
 
 import net.milkbowl.vault.util.StripedLock;
@@ -35,7 +34,8 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
     }
 
     public static class LaunderingResult extends VaultBlackMarketAPI.LaunderingResult {
-        public LaunderingResult(boolean success, boolean seized, double dirtyLaundered, double cleanReceived, double feePaid) {
+        public LaunderingResult(boolean success, boolean seized, double dirtyLaundered, double cleanReceived,
+                double feePaid) {
             super(success, seized, dirtyLaundered, cleanReceived, feePaid);
         }
     }
@@ -49,7 +49,8 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
     }
 
     public double getDirtyBalance(Player player) {
-        if (player == null) return 0.0;
+        if (player == null)
+            return 0.0;
         if (getMode().equals("ITEM")) {
             return countDirtyItems(player);
         } else {
@@ -59,7 +60,8 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
 
     @Override
     public double getDirtyBalance(OfflinePlayer player) {
-        if (player == null) return 0.0;
+        if (player == null)
+            return 0.0;
         if (player.isOnline() && player.getPlayer() != null) {
             return getDirtyBalance(player.getPlayer());
         }
@@ -68,12 +70,14 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
 
     @Override
     public void setDirtyBalance(OfflinePlayer player, double amount) {
-        if (player == null) return;
+        if (player == null)
+            return;
         dirtyBalances.put(player.getUniqueId(), Math.max(0.0, amount));
     }
 
     public void depositDirty(Player player, double amount) {
-        if (player == null || amount <= 0) return;
+        if (player == null || amount <= 0)
+            return;
         if (getMode().equals("ITEM")) {
             giveDirtyItem(player, amount);
         } else {
@@ -82,9 +86,11 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
     }
 
     public boolean withdrawDirty(Player player, double amount) {
-        if (player == null || amount <= 0) return false;
+        if (player == null || amount <= 0)
+            return false;
         double current = getDirtyBalance(player);
-        if (current < amount) return false;
+        if (current < amount)
+            return false;
 
         if (getMode().equals("ITEM")) {
             return removeDirtyItems(player, amount);
@@ -96,7 +102,8 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
 
     @Override
     public void addDirtyMoney(OfflinePlayer player, double amount) {
-        if (player == null || amount <= 0) return;
+        if (player == null || amount <= 0)
+            return;
         if (player.isOnline() && player.getPlayer() != null) {
             depositDirty(player.getPlayer(), amount);
         } else {
@@ -106,7 +113,8 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
 
     @Override
     public LaunderingResult launder(Player player, double dirtyAmount) {
-        return launder(player, dirtyAmount, net.milkbowl.vault.Vault.getWrappedEconomies().isEmpty() ? null : net.milkbowl.vault.Vault.getWrappedEconomies().get(0));
+        return launder(player, dirtyAmount, net.milkbowl.vault.Vault.getWrappedEconomies().isEmpty() ? null
+                : net.milkbowl.vault.Vault.getWrappedEconomies().get(0));
     }
 
     public LaunderingResult launder(Player player, double dirtyAmount, Economy econ) {
@@ -162,7 +170,8 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
         double count = 0;
         String matName = plugin.getConfig().getString("blackmarket.item.material", "PAPER");
         Material mat = Material.matchMaterial(matName);
-        if (mat == null) mat = Material.PAPER;
+        if (mat == null)
+            mat = Material.PAPER;
 
         for (ItemStack item : player.getInventory().getContents()) {
             if (item != null && item.getType() == mat && item.hasItemMeta()) {
@@ -179,7 +188,8 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
     private void giveDirtyItem(Player player, double amount) {
         String matName = plugin.getConfig().getString("blackmarket.item.material", "PAPER");
         Material mat = Material.matchMaterial(matName);
-        if (mat == null) mat = Material.PAPER;
+        if (mat == null)
+            mat = Material.PAPER;
 
         int itemCount = Math.max(1, (int) Math.round(amount / 100.0));
         ItemStack item = new ItemStack(mat, itemCount);
@@ -200,7 +210,8 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
                 try {
                     java.lang.reflect.Method m = meta.getClass().getMethod("setCustomModelData", Integer.class);
                     m.invoke(meta, cmd);
-                } catch (Throwable ignored) {}
+                } catch (Throwable ignored) {
+                }
             }
             item.setItemMeta(meta);
         }
@@ -214,7 +225,8 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
     private boolean removeDirtyItems(Player player, double amount) {
         String matName = plugin.getConfig().getString("blackmarket.item.material", "PAPER");
         Material mat = Material.matchMaterial(matName);
-        if (mat == null) mat = Material.PAPER;
+        if (mat == null)
+            mat = Material.PAPER;
 
         int itemsToRemove = Math.max(1, (int) Math.round(amount / 100.0));
         ItemStack[] contents = player.getInventory().getContents();
@@ -231,7 +243,8 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
                         item.setAmount(count - itemsToRemove);
                         itemsToRemove = 0;
                     }
-                    if (itemsToRemove <= 0) break;
+                    if (itemsToRemove <= 0)
+                        break;
                 }
             }
         }
@@ -243,7 +256,8 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
      * Using the display name alone is exploitable via anvil renaming.
      */
     private boolean isDirtyMoneyItem(ItemMeta meta) {
-        if (!meta.hasLore()) return false;
+        if (!meta.hasLore())
+            return false;
         List<String> lore = meta.getLore();
         return lore != null && lore.contains(DIRTY_LORE_MARKER);
     }

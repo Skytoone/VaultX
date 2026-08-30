@@ -9,6 +9,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
 
+import net.milkbowl.vault.economy.events.VaultLoanStatusChangeEvent;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
@@ -198,6 +199,11 @@ public class LoanManager {
         // Update loan state
         double newRemaining = Math.max(0.0, loan.remaining - (paidAmount + unpaidAmount));
         String newStatus = newRemaining <= 0.0 ? "PAID" : "ACTIVE";
+        if (newRemaining <= 0.0) {
+            Bukkit.getPluginManager().callEvent(new VaultLoanStatusChangeEvent(borrower, loan.id, loan.principal, "default", VaultLoanStatusChangeEvent.LoanStatus.REPAID));
+        } else if (unpaidAmount > 0.0) {
+            Bukkit.getPluginManager().callEvent(new VaultLoanStatusChangeEvent(borrower, loan.id, unpaidAmount, "default", VaultLoanStatusChangeEvent.LoanStatus.OVERDUE));
+        }
         long billingIntervalMs = plugin.getConfig().getLong("loans.billing-interval-minutes", 60L) * 60L * 1000L;
         long nextBilling = loan.nextBilling + billingIntervalMs;
 
@@ -279,6 +285,7 @@ public class LoanManager {
                 failoverManager.savePlayerTransaction(borrowerUuid, "DEPOSIT_LOAN_DISBURSE", "default", amount,
                         "Bank:" + bankName.toUpperCase());
 
+                Bukkit.getPluginManager().callEvent(new VaultLoanStatusChangeEvent(player, loanId, amount, "default", VaultLoanStatusChangeEvent.LoanStatus.TAKEN));
                 player.sendMessage(Vault.getMessage("loans.applied-success",
                         "§a§l✔ §aLoan §e#%id% §aof §e%amount% §agranted! The total amount with interest of §e%total% §awill be repaid in 10 installments.")
                         .replace("%id%", loanId)

@@ -10,6 +10,7 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.scheduler.BukkitTask;
 
+import net.milkbowl.vault.economy.events.VaultSubscriptionRenewEvent;
 import java.util.List;
 import java.util.UUID;
 
@@ -210,6 +211,7 @@ public class SubscriptionManager {
         }
 
         if (depositSuccess) {
+            Bukkit.getPluginManager().callEvent(new VaultSubscriptionRenewEvent(subscriber, String.valueOf(sub.id), currency, sub.amount, true));
             final String finalTargetName = targetName;
             final double finalAmount = sub.amount;
             final String finalCurrency = currency;

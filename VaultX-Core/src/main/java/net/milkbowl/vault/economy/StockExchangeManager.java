@@ -11,6 +11,7 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
 
 import net.milkbowl.vault.economy.VaultStockAPI;
+import net.milkbowl.vault.economy.events.VaultStockPriceChangeEvent;
 import java.util.concurrent.CompletableFuture;
 import java.util.*;
 
@@ -104,6 +105,7 @@ public class StockExchangeManager implements VaultStockAPI {
             double changePercent = (random.nextDouble() - 0.5) * (maxFluctuation * 2.0); // random walk
             double newPrice = Math.max(MIN_PRICES.get(commodity), current * (1.0 + changePercent));
             failoverManager.updateCommodityPrice(commodity, newPrice);
+            Bukkit.getPluginManager().callEvent(new VaultStockPriceChangeEvent(commodity, current, newPrice));
         }
 
         // 2. Chance of a market news event
@@ -126,6 +128,7 @@ public class StockExchangeManager implements VaultStockAPI {
                 : (1.0 - (0.08 + random.nextDouble() * 0.07));
         double newPrice = Math.max(MIN_PRICES.get(commodity), current * factor);
         failoverManager.updateCommodityPrice(commodity, newPrice);
+        Bukkit.getPluginManager().callEvent(new VaultStockPriceChangeEvent(commodity, current, newPrice));
 
         double percentChange = (factor - 1.0) * 100.0;
         String eventMsg;
@@ -337,7 +340,9 @@ public class StockExchangeManager implements VaultStockAPI {
                     net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
                         double currentShares = failoverManager.getPlayerStockShares(player.getUniqueId(), comm);
                         failoverManager.updatePlayerStockShares(player.getUniqueId(), comm, currentShares + shares);
-                        failoverManager.updateCommodityPrice(comm, price * (1.0 + 0.0005 * shares));
+                        double newPrice = price * (1.0 + 0.0005 * shares);
+                        failoverManager.updateCommodityPrice(comm, newPrice);
+                        Bukkit.getPluginManager().callEvent(new VaultStockPriceChangeEvent(comm, price, newPrice));
                         failoverManager.savePlayerTransaction(player.getUniqueId(), "WITHDRAW_STOCK_BUY", "default", cost, comm.toUpperCase());
                         future.complete(true);
                     });
@@ -375,7 +380,9 @@ public class StockExchangeManager implements VaultStockAPI {
                 if (dRes.transactionSuccess()) {
                     net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
                         failoverManager.updatePlayerStockShares(player.getUniqueId(), comm, currentShares - shares);
-                        failoverManager.updateCommodityPrice(comm, Math.max(1.0, price * (1.0 - 0.0005 * shares)));
+                        double newPrice = Math.max(1.0, price * (1.0 - 0.0005 * shares));
+                        failoverManager.updateCommodityPrice(comm, newPrice);
+                        Bukkit.getPluginManager().callEvent(new VaultStockPriceChangeEvent(comm, price, newPrice));
                         failoverManager.savePlayerTransaction(player.getUniqueId(), "DEPOSIT_STOCK_SELL", "default", payout, comm.toUpperCase());
                         future.complete(true);
                     });
