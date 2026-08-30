@@ -23,7 +23,7 @@ import net.milkbowl.vault.util.StripedLock;
  * Redis cross-server synchronization, and Multi-Currency support.
  */
 @SuppressWarnings("deprecation")
-public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy, VaultLeaderboardAPI, VaultBatchTransactionAPI, VaultFormatAPI, VaultMailboxAPI, VaultBoosterAPI, VaultLockAPI, VaultSubscriptionAPI, VaultAnalyticsAPI, VaultCurrencyRegistry, VaultAuditAPI, VaultCheckAPI, VaultLoanAPI, VaultInflationAPI, VaultMilestoneAPI, VaultCryptoAPI {
+public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy, VaultLeaderboardAPI, VaultBatchTransactionAPI, VaultFormatAPI, VaultMailboxAPI, VaultBoosterAPI, VaultLockAPI, VaultSubscriptionAPI, VaultAnalyticsAPI, VaultCurrencyRegistry, VaultAuditAPI, VaultCheckAPI, VaultLoanAPI, VaultInflationAPI, VaultMilestoneAPI, VaultCryptoAPI, VaultAuctionAPI, VaultStakingAPI, VaultTaxAPI, VaultCreditAPI {
 
     private final Economy delegate;
     private final boolean useCache;
@@ -1775,6 +1775,230 @@ public class OptimizedEconomy implements MultiCurrencyEconomy, VaultAsyncEconomy
             return java.util.concurrent.CompletableFuture.completedFuture(false);
         }
         return java.util.concurrent.CompletableFuture.completedFuture(true);
+    }
+
+    // ==========================================
+    //           VaultAuctionAPI Implementation
+    // ==========================================
+    private final Map<String, VaultAuctionAPI.AuctionListing> activeAuctions = new ConcurrentHashMap<>();
+
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultAuctionAPI.AuctionListing> createAuctionAsync(OfflinePlayer seller, org.bukkit.inventory.ItemStack item, String currency, double startingPrice, long durationMinutes) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (seller == null || item == null || startingPrice <= 0) return null;
+            String auctionId = "auc_" + UUID.randomUUID().toString().substring(0, 8);
+            long now = System.currentTimeMillis();
+            long expiresAt = now + (durationMinutes * 60L * 1000L);
+            VaultAuctionAPI.AuctionListing listing = new VaultAuctionAPI.AuctionListing(
+                    auctionId, seller.getUniqueId(), item, currency == null ? "default" : currency,
+                    startingPrice, startingPrice, null, durationMinutes * 60L * 1000L, expiresAt, false
+            );
+            activeAuctions.put(auctionId, listing);
+            return listing;
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<EconomyResponse> placeBidAsync(OfflinePlayer bidder, String auctionId, double bidAmount) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (bidder == null || auctionId == null) {
+                return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Invalid bidder or auctionId");
+            }
+            VaultAuctionAPI.AuctionListing listing = activeAuctions.get(auctionId);
+            if (listing == null || listing.isClosed() || System.currentTimeMillis() > listing.expiresAtMs()) {
+                return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Auction closed or expired");
+            }
+            if (bidAmount <= listing.currentBid()) {
+                return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Bid amount must be higher than current bid");
+            }
+            var res = withdrawCurrencyPlayer(bidder, listing.currency(), bidAmount);
+            if (!res.transactionSuccess()) return res;
+
+            if (listing.highestBidderUuid() != null) {
+                depositCurrencyPlayer(org.bukkit.Bukkit.getOfflinePlayer(listing.highestBidderUuid()), listing.currency(), listing.currentBid());
+            }
+
+            VaultAuctionAPI.AuctionListing updated = new VaultAuctionAPI.AuctionListing(
+                    listing.auctionId(), listing.sellerUuid(), listing.item(), listing.currency(),
+                    listing.startingPrice(), bidAmount, bidder.getUniqueId(), listing.durationMs(), listing.expiresAtMs(), false
+            );
+            activeAuctions.put(auctionId, updated);
+            return new EconomyResponse(bidAmount, getCurrencyBalance(bidder, listing.currency()), EconomyResponse.ResponseType.SUCCESS, "Bid placed successfully");
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<EconomyResponse> cancelAuctionAsync(OfflinePlayer seller, String auctionId) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (seller == null || auctionId == null) {
+                return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Invalid arguments");
+            }
+            VaultAuctionAPI.AuctionListing listing = activeAuctions.get(auctionId);
+            if (listing == null || !listing.sellerUuid().equals(seller.getUniqueId())) {
+                return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Auction not found or unauthorized");
+            }
+            if (listing.highestBidderUuid() != null) {
+                return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Cannot cancel auction with active bids");
+            }
+            activeAuctions.remove(auctionId);
+            return new EconomyResponse(0, 0, EconomyResponse.ResponseType.SUCCESS, "Auction cancelled");
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<java.util.List<VaultAuctionAPI.AuctionListing>> getActiveAuctionsAsync() {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            long now = System.currentTimeMillis();
+            return activeAuctions.values().stream()
+                    .filter(a -> !a.isClosed() && a.expiresAtMs() > now)
+                    .toList();
+        }, asyncExecutor);
+    }
+
+    // ==========================================
+    //           VaultStakingAPI Implementation
+    // ==========================================
+    private final Map<String, VaultStakingAPI.StakeDeposit> activeStakes = new ConcurrentHashMap<>();
+
+    @Override
+    public java.util.concurrent.CompletableFuture<EconomyResponse> createStakeAsync(OfflinePlayer player, String currency, double amount, int durationDays) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (player == null || amount <= 0 || durationDays <= 0) {
+                return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Invalid staking parameters");
+            }
+            String curr = currency == null ? "default" : currency;
+            var res = withdrawCurrencyPlayer(player, curr, amount);
+            if (!res.transactionSuccess()) return res;
+
+            String stakeId = "stake_" + UUID.randomUUID().toString().substring(0, 8);
+            long now = System.currentTimeMillis();
+            long lockMs = durationDays * 86400000L;
+            double rate = 0.05 * (durationDays / 30.0 + 1.0);
+
+            VaultStakingAPI.StakeDeposit deposit = new VaultStakingAPI.StakeDeposit(
+                    stakeId, player.getUniqueId(), curr, amount, rate, now, lockMs, false, false
+            );
+            activeStakes.put(stakeId, deposit);
+            return new EconomyResponse(amount, getCurrencyBalance(player, curr), EconomyResponse.ResponseType.SUCCESS, "Staked " + amount + " " + curr);
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<EconomyResponse> claimStakeAsync(OfflinePlayer player, String depositId) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (player == null || depositId == null) {
+                return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Invalid arguments");
+            }
+            VaultStakingAPI.StakeDeposit deposit = activeStakes.get(depositId);
+            if (deposit == null || !deposit.playerUuid().equals(player.getUniqueId())) {
+                return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Stake deposit not found");
+            }
+            if (deposit.isClaimed()) {
+                return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Stake deposit already claimed");
+            }
+            long now = System.currentTimeMillis();
+            if (now < deposit.stakedAtMs() + deposit.lockPeriodMs()) {
+                return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Stake deposit is still locked");
+            }
+
+            double totalPayout = deposit.principal() * (1.0 + deposit.interestRate());
+            var res = depositCurrencyPlayer(player, deposit.currency(), totalPayout);
+            if (res.transactionSuccess()) {
+                activeStakes.put(depositId, new VaultStakingAPI.StakeDeposit(
+                        deposit.depositId(), deposit.playerUuid(), deposit.currency(), deposit.principal(),
+                        deposit.interestRate(), deposit.stakedAtMs(), deposit.lockPeriodMs(), true, true
+                ));
+            }
+            return res;
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<java.util.List<VaultStakingAPI.StakeDeposit>> getActiveStakesAsync(OfflinePlayer player) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (player == null) return java.util.Collections.emptyList();
+            return activeStakes.values().stream()
+                    .filter(s -> s.playerUuid().equals(player.getUniqueId()) && !s.isClaimed())
+                    .toList();
+        }, asyncExecutor);
+    }
+
+    // ==========================================
+    //           VaultTaxAPI Implementation
+    // ==========================================
+    private final Map<String, VaultTaxAPI.TaxRule> taxRules = new ConcurrentHashMap<>();
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Boolean> registerTaxRuleAsync(VaultTaxAPI.TaxRule rule) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (rule == null || rule.taxId() == null) return false;
+            taxRules.put(rule.taxId(), rule);
+            return true;
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Boolean> unregisterTaxRuleAsync(String taxId) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (taxId == null) return false;
+            return taxRules.remove(taxId) != null;
+        }, asyncExecutor);
+    }
+
+    @Override
+    public double calculateTax(String regionOrWorld, String currency, double amount) {
+        if (amount <= 0) return 0.0;
+        double totalTax = 0.0;
+        for (VaultTaxAPI.TaxRule rule : taxRules.values()) {
+            if (rule.regionOrWorld().equalsIgnoreCase(regionOrWorld) && rule.currency().equalsIgnoreCase(currency)) {
+                totalTax += (amount * (rule.percentageRate() / 100.0)) + rule.fixedFee();
+            }
+        }
+        return totalTax;
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Map<String, VaultTaxAPI.TaxRule>> getActiveTaxRulesAsync() {
+        return java.util.concurrent.CompletableFuture.completedFuture(new java.util.HashMap<>(taxRules));
+    }
+
+    // ==========================================
+    //           VaultCreditAPI Implementation
+    // ==========================================
+    private final Map<UUID, Map<String, VaultCreditAPI.CreditAccount>> creditAccounts = new ConcurrentHashMap<>();
+
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultCreditAPI.CreditAccount> getCreditAccountAsync(OfflinePlayer player, String currency) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            UUID uuid = player != null ? player.getUniqueId() : UUID.randomUUID();
+            String curr = currency == null ? "default" : currency;
+            return creditAccounts.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>())
+                    .computeIfAbsent(curr, c -> new VaultCreditAPI.CreditAccount(uuid, c, 500.0, 0.0, 700, false));
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<EconomyResponse> setOverdraftLimitAsync(OfflinePlayer player, String currency, double limit) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (player == null || limit < 0) {
+                return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Invalid arguments");
+            }
+            String curr = currency == null ? "default" : currency;
+            var accMap = creditAccounts.computeIfAbsent(player.getUniqueId(), k -> new ConcurrentHashMap<>());
+            VaultCreditAPI.CreditAccount existing = accMap.getOrDefault(curr, new VaultCreditAPI.CreditAccount(player.getUniqueId(), curr, 500.0, 0.0, 700, false));
+            accMap.put(curr, new VaultCreditAPI.CreditAccount(existing.playerUuid(), curr, limit, existing.currentUsedCredit(), existing.creditScore(), existing.isFrozen()));
+            return new EconomyResponse(limit, limit, EconomyResponse.ResponseType.SUCCESS, "Overdraft limit updated to " + limit);
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Integer> updateCreditScoreAsync(OfflinePlayer player) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            if (player == null) return 300;
+            double bal = getBalance(player);
+            int score = (int) Math.min(850, Math.max(300, 600 + (bal / 1000.0)));
+            return score;
+        }, asyncExecutor);
     }
 }
 

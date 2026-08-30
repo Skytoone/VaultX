@@ -810,6 +810,10 @@ public class Vault extends JavaPlugin {
         wrappedEconomies.add(wrapped);
         sm.register(Economy.class, wrapped, this, ServicePriority.Lowest);
         sm.register(MultiCurrencyEconomy.class, wrapped, this, ServicePriority.Lowest);
+        sm.register(net.milkbowl.vault.economy.VaultAuctionAPI.class, wrapped, this, ServicePriority.Lowest);
+        sm.register(net.milkbowl.vault.economy.VaultStakingAPI.class, wrapped, this, ServicePriority.Lowest);
+        sm.register(net.milkbowl.vault.economy.VaultTaxAPI.class, wrapped, this, ServicePriority.Lowest);
+        sm.register(net.milkbowl.vault.economy.VaultCreditAPI.class, wrapped, this, ServicePriority.Lowest);
     }
 
     private void wrapExistingEconomies() {
@@ -849,6 +853,10 @@ public class Vault extends JavaPlugin {
         // spot
         sm.register(Economy.class, wrapped, this, ServicePriority.Highest);
         sm.register(MultiCurrencyEconomy.class, wrapped, this, ServicePriority.Highest);
+        sm.register(net.milkbowl.vault.economy.VaultAuctionAPI.class, wrapped, this, ServicePriority.Highest);
+        sm.register(net.milkbowl.vault.economy.VaultStakingAPI.class, wrapped, this, ServicePriority.Highest);
+        sm.register(net.milkbowl.vault.economy.VaultTaxAPI.class, wrapped, this, ServicePriority.Highest);
+        sm.register(net.milkbowl.vault.economy.VaultCreditAPI.class, wrapped, this, ServicePriority.Highest);
     }
 
     private void loadMessagesConfig() {
