@@ -21,6 +21,7 @@
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <api.version>1.7</api.version>
+        <mainClass>net.milkbowl.vault.Vault</mainClass>
     </properties>
 
     <repositories>
