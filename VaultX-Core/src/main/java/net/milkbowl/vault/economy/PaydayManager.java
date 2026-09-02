@@ -106,8 +106,6 @@ public class PaydayManager {
                         double taxPercent = net.milkbowl.vault.Vault.getDynamicTaxPercent("payday", plugin.getConfig().getDouble("paydays.tax.percent", 10.0));
                         String treasuryAccount = plugin.getConfig().getString("central-bank.taxes.treasury-account", "tresor_public");
 
-                        final List<Runnable> asyncTasks = new ArrayList<>();
-
                         for (final PlayerData data : playersToPay) {
                             double amount = plugin.getConfig().getDouble("paydays.groups." + data.group, -1.0);
                             if (amount < 0) {
@@ -122,81 +120,73 @@ public class PaydayManager {
                             final double taxAmount = taxEnabled ? (totalAmount * (taxPercent / 100.0)) : 0.0;
                             final double netAmount = totalAmount - taxAmount;
 
-                            // Apply salary garnishment if debt exists
-                            double debt = data.debt;
-                            double garnished = 0.0;
-                            double finalPaid = netAmount;
-
-                            if (debt > 0.0) {
-                                garnished = Math.min(netAmount, debt);
-                                finalPaid = netAmount - garnished;
-                                final double newDebt = debt - garnished;
-                                final double finalGarnished = garnished;
-                                if (failoverManager != null) {
-                                    asyncTasks.add(() -> {
-                                        failoverManager.updatePlayerDebt(data.uuid, newDebt);
-                                        failoverManager.savePlayerTransaction(treasuryUuid, "DEPOSIT_GARNISHMENT", "default", finalGarnished, data.name);
-                                        failoverManager.savePlayerTransaction(data.uuid, "WITHDRAW_GARNISHMENT", "default", finalGarnished, "Treasury");
-                                    });
-                                    econ.bankDeposit(treasuryAccount, garnished);
-                                }
-                            }
-
-                            // Deposit to player
-                            econ.depositPlayer(Bukkit.getOfflinePlayer(data.uuid), finalPaid);
-
-                            // Save transaction log for player
-                            final double finalPaidForAsync = finalPaid;
-                            if (failoverManager != null) {
-                                asyncTasks.add(() -> {
-                                    failoverManager.savePlayerTransaction(data.uuid, "DEPOSIT_SALARY", "default", finalPaidForAsync, "Government");
-                                });
-                            }
-
-                            // Handle tax deposit to Treasury
-                            if (taxEnabled && taxAmount > 0.0) {
-                                econ.bankDeposit(treasuryAccount, taxAmount);
-                                final double finalTaxAmount = taxAmount;
-                                if (failoverManager != null) {
-                                    asyncTasks.add(() -> {
-                                        failoverManager.savePlayerTransaction(treasuryUuid, "DEPOSIT_TAX", "default", finalTaxAmount, data.name);
-                                    });
-                                }
-                            }
-
-                            // Notify player if online (run inline on main thread)
                             Player p = Bukkit.getPlayer(data.uuid);
-                            if (p != null && p.isOnline()) {
-                                if (garnished > 0.0) {
-                                    p.sendMessage(net.milkbowl.vault.Vault.getMessage("payday.salary-garnished", "&c&l[Salary] &cSalary garnishment of &e%garnished% &cwas applied to repay your debt (Net paid: &e%net%&c).")
-                                            .replace("%garnished%", econ.format(garnished))
-                                            .replace("%net%", econ.format(finalPaid)));
-                                } else if (taxAmount > 0.0) {
-                                    p.sendMessage(net.milkbowl.vault.Vault.getMessage("payday.salary-received-taxed", "&a&l[Salary] &aYou received your salary of &e%amount% &a(including &e%tax% &ataxes paid to Treasury).")
-                                            .replace("%amount%", econ.format(finalPaid))
-                                            .replace("%tax%", econ.format(taxAmount)));
-                                } else {
-                                    p.sendMessage(net.milkbowl.vault.Vault.getMessage("payday.salary-received", "&a&l[Salary] &aYou received your salary of &e%amount%&a.")
-                                            .replace("%amount%", econ.format(finalPaid)));
+                            net.milkbowl.vault.util.FoliaScheduler.runEntitySync(plugin, p != null ? p : Bukkit.getOfflinePlayer(data.uuid).getPlayer(), () -> {
+                                // Apply salary garnishment if debt exists
+                                double debt = data.debt;
+                                double garnished = 0.0;
+                                double finalPaid = netAmount;
+
+                                if (debt > 0.0) {
+                                    garnished = Math.min(netAmount, debt);
+                                    finalPaid = netAmount - garnished;
+                                    final double newDebt = debt - garnished;
+                                    final double finalGarnished = garnished;
+                                    if (failoverManager != null) {
+                                        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                                            failoverManager.updatePlayerDebt(data.uuid, newDebt);
+                                            failoverManager.savePlayerTransaction(treasuryUuid, "DEPOSIT_GARNISHMENT", "default", finalGarnished, data.name);
+                                            failoverManager.savePlayerTransaction(data.uuid, "WITHDRAW_GARNISHMENT", "default", finalGarnished, "Treasury");
+                                        });
+                                        econ.bankDeposit(treasuryAccount, garnished);
+                                    }
                                 }
-                            }
 
-                            if (net.milkbowl.vault.Vault.getDiscordManager() != null) {
-                                String webhookTemplate = net.milkbowl.vault.Vault.getMessage("discord.webhook-payday", "💰 **Payday Payout**\nUser **%player%** received salary of **%amount%** (Group: %group%)!");
-                                String content = webhookTemplate
-                                        .replace("%player%", data.name)
-                                        .replace("%amount%", econ.format(finalPaid))
-                                        .replace("%group%", data.group);
-                                net.milkbowl.vault.Vault.getDiscordManager().sendWebhook("payday", content);
-                            }
-                        }
+                                // Deposit to player
+                                econ.depositPlayer(Bukkit.getOfflinePlayer(data.uuid), finalPaid);
 
-                        if (!asyncTasks.isEmpty()) {
-                            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
-                                for (Runnable task : asyncTasks) {
-                                    try {
-                                        task.run();
-                                    } catch (Exception ignored) {}
+                                // Save transaction log for player
+                                final double finalPaidForAsync = finalPaid;
+                                if (failoverManager != null) {
+                                    net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                                        failoverManager.savePlayerTransaction(data.uuid, "DEPOSIT_SALARY", "default", finalPaidForAsync, "Government");
+                                    });
+                                }
+
+                                // Handle tax deposit to Treasury
+                                if (taxEnabled && taxAmount > 0.0) {
+                                    econ.bankDeposit(treasuryAccount, taxAmount);
+                                    final double finalTaxAmount = taxAmount;
+                                    if (failoverManager != null) {
+                                        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                                            failoverManager.savePlayerTransaction(treasuryUuid, "DEPOSIT_TAX", "default", finalTaxAmount, data.name);
+                                        });
+                                    }
+                                }
+
+                                // Notify player if online
+                                if (p != null && p.isOnline()) {
+                                    if (garnished > 0.0) {
+                                        p.sendMessage(net.milkbowl.vault.Vault.getMessage("payday.salary-garnished", "&c&l[Salary] &cSalary garnishment of &e%garnished% &cwas applied to repay your debt (Net paid: &e%net%&c).")
+                                                .replace("%garnished%", econ.format(garnished))
+                                                .replace("%net%", econ.format(finalPaid)));
+                                    } else if (taxAmount > 0.0) {
+                                        p.sendMessage(net.milkbowl.vault.Vault.getMessage("payday.salary-received-taxed", "&a&l[Salary] &aYou received your salary of &e%amount% &a(including &e%tax% &ataxes paid to Treasury).")
+                                                .replace("%amount%", econ.format(finalPaid))
+                                                .replace("%tax%", econ.format(taxAmount)));
+                                    } else {
+                                        p.sendMessage(net.milkbowl.vault.Vault.getMessage("payday.salary-received", "&a&l[Salary] &aYou received your salary of &e%amount%&a.")
+                                                .replace("%amount%", econ.format(finalPaid)));
+                                    }
+                                }
+
+                                if (net.milkbowl.vault.Vault.getDiscordManager() != null) {
+                                    String webhookTemplate = net.milkbowl.vault.Vault.getMessage("discord.webhook-payday", "💰 **Payday Payout**\nUser **%player%** received salary of **%amount%** (Group: %group%)!");
+                                    String content = webhookTemplate
+                                            .replace("%player%", data.name)
+                                            .replace("%amount%", econ.format(finalPaid))
+                                            .replace("%group%", data.group);
+                                    net.milkbowl.vault.Vault.getDiscordManager().sendWebhook("payday", content);
                                 }
                             });
                         }

@@ -166,20 +166,21 @@ public class LoanManager {
                 });
             }
 
-            unpaidAmount = installment - currentBal;
+            double unpaidBase = installment - currentBal;
             paidAmount = currentBal;
 
             // Apply overdue penalty percentage if configured
             double penaltyPercent = plugin.getConfig().getDouble("loans.overdue-penalty-percent", 2.5);
+            double unpaidWithPenalty = unpaidBase;
             if (penaltyPercent > 0.0) {
-                unpaidAmount *= (1.0 + (penaltyPercent / 100.0));
+                unpaidWithPenalty = unpaidBase * (1.0 + (penaltyPercent / 100.0));
             }
 
             // Government advances the payment to the bank, and player owes the treasury
-            econ.bankDeposit(loan.bankName, unpaidAmount);
+            econ.bankDeposit(loan.bankName, unpaidWithPenalty);
             
-            double newBankBal = dbBankBal + installment;
-            double newPlayerDebt = dbPlayerDebt + unpaidAmount;
+            double newBankBal = dbBankBal + paidAmount + unpaidWithPenalty;
+            double newPlayerDebt = dbPlayerDebt + unpaidWithPenalty;
 
             dbBankBalances.put(bankKey, newBankBal);
             updatedBanks.add(bankKey);
@@ -192,8 +193,9 @@ public class LoanManager {
                 p.sendMessage(Vault.getMessage("loans.billing-insufficient",
                         "§c§l[Loan] §cInsufficient funds for installment! §e%paid% §cwere repaid. The unpaid balance of §e%unpaid% §cwas added to your salary garnishment debts.")
                         .replace("%paid%", econ.format(paidAmount))
-                        .replace("%unpaid%", econ.format(unpaidAmount)));
+                        .replace("%unpaid%", econ.format(unpaidWithPenalty)));
             }
+            unpaidAmount = unpaidBase;
         }
 
         // Update loan state

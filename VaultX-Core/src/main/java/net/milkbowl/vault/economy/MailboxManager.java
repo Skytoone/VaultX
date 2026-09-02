@@ -18,6 +18,8 @@ public class MailboxManager implements Listener {
 
     private final Plugin plugin;
 
+    private final java.util.Set<Integer> claimingMailIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     public MailboxManager(Plugin plugin) {
         this.plugin = plugin;
         Bukkit.getPluginManager().registerEvents(this, plugin);
@@ -27,7 +29,16 @@ public class MailboxManager implements Listener {
      * Send an offline payment to a player's mailbox.
      */
     public void sendOfflineMail(UUID receiverUuid, String senderName, String message, double amount, String currency) {
+        if (!plugin.getConfig().getBoolean("mailbox.enabled", true)) {
+            return;
+        }
         net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+            int maxMessages = plugin.getConfig().getInt("mailbox.max-messages-per-player", 50);
+            List<MailRecord> existing = Vault.getFailoverManager().getPendingMail(receiverUuid);
+            if (existing != null && existing.size() >= maxMessages) {
+                plugin.getLogger().warning("[VaultX Mailbox] Cannot send mail to " + receiverUuid + ": player reached maximum pending mailbox limit (" + maxMessages + ").");
+                return;
+            }
             Vault.getFailoverManager().addMail(receiverUuid, senderName, message, amount, currency);
             if (Vault.getDiscordManager() != null) {
                 String receiverName = net.milkbowl.vault.util.UUIDCache.getName(receiverUuid);
@@ -53,39 +64,57 @@ public class MailboxManager implements Listener {
      * Claim a specific mail record for a player.
      */
     public boolean claimMailRecord(Player player, MailRecord record) {
-        RegisteredServiceProvider<Economy> rsp = Bukkit.getServicesManager().getRegistration(Economy.class);
-        if (rsp == null)
-            return false;
-        Economy econ = rsp.getProvider();
-
-        String currency = record.currency.toLowerCase();
-        double amount = record.amount;
-        EconomyResponse response;
-
-        if (currency.equals("default")) {
-            response = econ.depositPlayer(player, amount);
-        } else if (econ instanceof MultiCurrencyEconomy) {
-            response = ((MultiCurrencyEconomy) econ).depositCurrencyPlayer(player, currency, amount);
-        } else {
-            player.sendMessage(Vault.getMessage("commands.mailbox.no-multicurrency", "&c&l[Mailbox] &cCannot claim this currency as multi-currency is not supported."));
+        if (record == null || player == null) return false;
+        if (!claimingMailIds.add(record.id)) {
             return false;
         }
 
-        if (response.transactionSuccess()) {
-            // Update status in DB
-            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
-                Vault.getFailoverManager().claimMail(record.id);
-            });
-            player.sendMessage(Vault.getMessage("commands.mailbox.claimed-one", "&a&l[Mailbox] &aYou claimed &e%amount% &7(%currency%) &asent by &f%sender%&a.")
-                    .replace("%amount%", econ.format(amount))
-                    .replace("%currency%", currency.toUpperCase())
-                    .replace("%sender%", record.senderName));
-            playSoundSafe(player, 1.0f, 1.0f, "ENTITY_EXPERIENCE_ORB_PICKUP", "ORB_PICKUP");
-            return true;
-        } else {
-            player.sendMessage(Vault.getMessage("commands.mailbox.claim-failed", "&c&l[Mailbox] &cClaim deposit failed: %error%")
-                    .replace("%error%", response.errorMessage));
-            return false;
+        boolean success = false;
+        try {
+            RegisteredServiceProvider<Economy> rsp = Bukkit.getServicesManager().getRegistration(Economy.class);
+            if (rsp == null) {
+                return false;
+            }
+            Economy econ = rsp.getProvider();
+
+            String currency = record.currency.toLowerCase();
+            double amount = record.amount;
+            EconomyResponse response;
+
+            if (currency.equals("default")) {
+                response = econ.depositPlayer(player, amount);
+            } else if (econ instanceof MultiCurrencyEconomy) {
+                response = ((MultiCurrencyEconomy) econ).depositCurrencyPlayer(player, currency, amount);
+            } else {
+                player.sendMessage(Vault.getMessage("commands.mailbox.no-multicurrency", "&c&l[Mailbox] &cCannot claim this currency as multi-currency is not supported."));
+                return false;
+            }
+
+            if (response.transactionSuccess()) {
+                success = true;
+                // Update status in DB, then remove from claimingMailIds once DB is updated
+                net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                    try {
+                        Vault.getFailoverManager().claimMail(record.id);
+                    } finally {
+                        claimingMailIds.remove(record.id);
+                    }
+                });
+                player.sendMessage(Vault.getMessage("commands.mailbox.claimed-one", "&a&l[Mailbox] &aYou claimed &e%amount% &7(%currency%) &asent by &f%sender%&a.")
+                        .replace("%amount%", econ.format(amount))
+                        .replace("%currency%", currency.toUpperCase())
+                        .replace("%sender%", record.senderName));
+                playSoundSafe(player, 1.0f, 1.0f, "ENTITY_EXPERIENCE_ORB_PICKUP", "ORB_PICKUP");
+                return true;
+            } else {
+                player.sendMessage(Vault.getMessage("commands.mailbox.claim-failed", "&c&l[Mailbox] &cClaim deposit failed: %error%")
+                        .replace("%error%", response.errorMessage));
+                return false;
+            }
+        } finally {
+            if (!success) {
+                claimingMailIds.remove(record.id);
+            }
         }
     }
 
@@ -100,7 +129,7 @@ public class MailboxManager implements Listener {
                 return;
             }
 
-            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+            net.milkbowl.vault.util.FoliaScheduler.runEntitySync(plugin, player, () -> {
                 int count = 0;
                 for (MailRecord record : pending) {
                     if (claimMailRecord(player, record)) {
@@ -125,38 +154,40 @@ public class MailboxManager implements Listener {
         net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
             List<MailRecord> pending = getPendingMail(uuid);
             if (!pending.isEmpty()) {
-                // Schedule reminder 2 seconds after join
-                net.milkbowl.vault.util.FoliaScheduler.runLater(plugin, () -> {
-                    if (player.isOnline()) {
-                        // Title Notification
-                        try {
+                // Schedule reminder 2 seconds after join on entity thread
+                net.milkbowl.vault.util.FoliaScheduler.runLaterAsync(plugin, () -> {
+                    net.milkbowl.vault.util.FoliaScheduler.runEntitySync(plugin, player, () -> {
+                        if (player.isOnline()) {
+                            // Title Notification
                             try {
-                                java.lang.reflect.Method sendTitleMethod = player.getClass().getMethod("sendTitle",
-                                        String.class, String.class, int.class, int.class, int.class);
-                                sendTitleMethod.invoke(player,
-                                        Vault.getMessage("commands.mailbox.title-mailbox", "&d&lMailbox"),
-                                        Vault.getMessage("commands.mailbox.title-subtitle", "&fYou have &e%count% &fpending payment(s)!").replace("%count%", String.valueOf(pending.size())),
-                                        10, 40, 10);
-                            } catch (NoSuchMethodException e) {
-                                player.sendTitle(
-                                        Vault.getMessage("commands.mailbox.title-mailbox", "&d&lMailbox"),
-                                        Vault.getMessage("commands.mailbox.title-subtitle", "&fYou have &e%count% &fpending payment(s)!").replace("%count%", String.valueOf(pending.size())));
+                                try {
+                                    java.lang.reflect.Method sendTitleMethod = player.getClass().getMethod("sendTitle",
+                                            String.class, String.class, int.class, int.class, int.class);
+                                    sendTitleMethod.invoke(player,
+                                            Vault.getMessage("commands.mailbox.title-mailbox", "&d&lMailbox"),
+                                            Vault.getMessage("commands.mailbox.title-subtitle", "&fYou have &e%count% &fpending payment(s)!").replace("%count%", String.valueOf(pending.size())),
+                                            10, 40, 10);
+                                } catch (NoSuchMethodException e) {
+                                    player.sendTitle(
+                                            Vault.getMessage("commands.mailbox.title-mailbox", "&d&lMailbox"),
+                                            Vault.getMessage("commands.mailbox.title-subtitle", "&fYou have &e%count% &fpending payment(s)!").replace("%count%", String.valueOf(pending.size())));
+                                }
+                                playSoundSafe(player, 1.0f, 1.5f, "BLOCK_NOTE_BLOCK_PLING", "NOTE_PLING", "NOTE_PIANO");
+                            } catch (Throwable t) {
+                                // Backward compatibility support for older Spigot versions
+                                player.sendMessage(Vault.getMessage("commands.mailbox.chat-pending", "§d§l[Mailbox] §fYou have §e%count% §funclaimed transaction(s).")
+                                        .replace("%count%", String.valueOf(pending.size())));
                             }
-                            playSoundSafe(player, 1.0f, 1.5f, "BLOCK_NOTE_BLOCK_PLING", "NOTE_PLING", "NOTE_PIANO");
-                        } catch (Throwable t) {
-                            // Backward compatibility support for older Spigot versions
-                            player.sendMessage(Vault.getMessage("commands.mailbox.chat-pending", "§d§l[Mailbox] §fYou have §e%count% §funclaimed transaction(s).")
-                                    .replace("%count%", String.valueOf(pending.size())));
-                        }
 
-                        // Chat Notification
-                        player.sendMessage("");
-                        player.sendMessage(Vault.getMessage("commands.mailbox.chat-header", "§d§l📬 Economic Mailbox 📬"));
-                        player.sendMessage(Vault.getMessage("commands.mailbox.chat-offline", "§7You were offline during some transactions."));
-                        player.sendMessage(Vault.getMessage("commands.mailbox.chat-pending", "§fYou have §e%count% §funclaimed transaction(s).").replace("%count%", String.valueOf(pending.size())));
-                        player.sendMessage(Vault.getMessage("commands.mailbox.chat-info", "§fType §e/vx mailbox §fto open your mailbox and claim your funds!"));
-                        player.sendMessage("");
-                    }
+                            // Chat Notification
+                            player.sendMessage("");
+                            player.sendMessage(Vault.getMessage("commands.mailbox.chat-header", "§d§l📬 Economic Mailbox 📬"));
+                            player.sendMessage(Vault.getMessage("commands.mailbox.chat-offline", "§7You were offline during some transactions."));
+                            player.sendMessage(Vault.getMessage("commands.mailbox.chat-pending", "§fYou have §e%count% §funclaimed transaction(s).").replace("%count%", String.valueOf(pending.size())));
+                            player.sendMessage(Vault.getMessage("commands.mailbox.chat-info", "§fType §e/vx mailbox §fto open your mailbox and claim your funds!"));
+                            player.sendMessage("");
+                        }
+                    });
                 }, 40L);
             }
         });

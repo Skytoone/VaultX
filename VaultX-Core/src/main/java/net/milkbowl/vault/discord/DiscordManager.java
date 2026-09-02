@@ -61,6 +61,19 @@ public class DiscordManager {
                 } catch (Exception ignored) {}
             });
         }
+
+        // Warn administrators if the Discord bot is enabled but not yet implemented
+        if (isBotEnabled()) {
+            String token = getBotToken();
+            if (token == null || token.isEmpty() || token.equals("YOUR_DISCORD_BOT_TOKEN_HERE")) {
+                plugin.getLogger().warning(
+                        "[DiscordManager] discord.bot.enabled is true but no valid token was provided in discord.bot.token.");
+            } else {
+                plugin.getLogger().warning(
+                        "[DiscordManager] discord.bot.enabled is true, but the Discord bot feature is not yet implemented. "
+                        + "The token is configured but will not be used until a JDA integration is added.");
+            }
+        }
     }
 
     /**
@@ -178,6 +191,14 @@ public class DiscordManager {
                 }
             }
         });
+    }
+
+    public boolean isBotEnabled() {
+        return plugin.getConfig().getBoolean("discord.bot.enabled", false);
+    }
+
+    public String getBotToken() {
+        return plugin.getConfig().getString("discord.bot.token", "");
     }
 
     public void close() {

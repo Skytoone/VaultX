@@ -14,6 +14,10 @@
     <name>VaultX-Core</name>
     <description>Core plugin implementation of VaultX for Bukkit/Spigot/Paper servers.</description>
 
+    <properties>
+        <mainClass>net.milkbowl.vault.Vault</mainClass>
+    </properties>
+
     <dependencies>
         <!-- VaultX API Module -->
         <dependency>
@@ -142,6 +146,18 @@
                         <relocation>
                             <pattern>com.zaxxer.hikari</pattern>
                             <shadedPattern>net.milkbowl.vault.hikari</shadedPattern>
+                        </relocation>
+                        <relocation>
+                            <pattern>org.postgresql</pattern>
+                            <shadedPattern>net.milkbowl.vault.postgresql</shadedPattern>
+                        </relocation>
+                        <relocation>
+                            <pattern>org.apache.commons.pool2</pattern>
+                            <shadedPattern>net.milkbowl.vault.pool2</shadedPattern>
+                        </relocation>
+                        <relocation>
+                            <pattern>org.json</pattern>
+                            <shadedPattern>net.milkbowl.vault.json</shadedPattern>
                         </relocation>
                     </relocations>
                 </configuration>

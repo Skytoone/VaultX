@@ -176,6 +176,22 @@ public class Vault extends JavaPlugin {
         return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
     }
 
+    public static net.milkbowl.vault.economy.CryptoManager getCryptoManager() {
+        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0).getCryptoManager() : null;
+    }
+
+    public static net.milkbowl.vault.economy.AuctionManager getAuctionManager() {
+        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0).getAuctionManager() : null;
+    }
+
+    public static net.milkbowl.vault.economy.StakingManager getStakingManager() {
+        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0).getStakingManager() : null;
+    }
+
+    public static net.milkbowl.vault.economy.CreditManager getCreditManager() {
+        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0).getCreditManager() : null;
+    }
+
     @Override
     public void onDisable() {
         // Shutdown registered OptimizedEconomy thread pools and clear caches
@@ -285,16 +301,6 @@ public class Vault extends JavaPlugin {
                 getLogger().warning("[Vault] Exception closing TransactionFirewall: " + e.getMessage());
             }
         }
-
-        // Shutdown and clear wrapped economies to prevent memory retention across plugin reloads
-        for (OptimizedEconomy econ : wrappedEconomies) {
-            if (econ != null) {
-                try {
-                    econ.shutdown();
-                } catch (Exception ignored) {}
-            }
-        }
-        wrappedEconomies.clear();
 
         // Clear physical economy listener static checks cache
         net.milkbowl.vault.listener.PhysicalEconomyListener.cleanup();
@@ -447,10 +453,6 @@ public class Vault extends JavaPlugin {
             int pluginId = 31404;
             Metrics metrics = new Metrics(this, pluginId);
             findCustomData(metrics);
-
-            // Optional: Add custom charts
-            metrics.addCustomChart(
-                    new SimplePie("chart_id", () -> "My value"));
         }
 
         // Initialize Sync Provider (Redis or PostgreSQL)
@@ -764,9 +766,10 @@ public class Vault extends JavaPlugin {
 
             @EventHandler
             public void onPlayerQuit(PlayerQuitEvent event) {
-                RegisteredServiceProvider<Economy> rsp = sm.getRegistration(Economy.class);
-                if (rsp != null && rsp.getProvider() instanceof OptimizedEconomy) {
-                    ((OptimizedEconomy) rsp.getProvider()).invalidateCache(event.getPlayer());
+                for (OptimizedEconomy econ : wrappedEconomies) {
+                    if (econ != null) {
+                        econ.invalidateCache(event.getPlayer());
+                    }
                 }
                 if (firewall != null) {
                     firewall.invalidateCache(event.getPlayer());
@@ -782,20 +785,20 @@ public class Vault extends JavaPlugin {
             @EventHandler
             public void onPlayerPreLogin(org.bukkit.event.player.AsyncPlayerPreLoginEvent event) {
                 final UUID uuid = event.getUniqueId();
-                RegisteredServiceProvider<Economy> rsp = sm.getRegistration(Economy.class);
-                if (rsp != null && rsp.getProvider() instanceof OptimizedEconomy) {
-                    OptimizedEconomy econ = (OptimizedEconomy) rsp.getProvider();
-                    econ.warmCache(uuid);
+                for (OptimizedEconomy econ : wrappedEconomies) {
+                    if (econ != null) {
+                        econ.warmCache(uuid);
+                    }
                 }
             }
 
             @EventHandler
             public void onPlayerJoin(org.bukkit.event.player.PlayerJoinEvent event) {
                 org.bukkit.entity.Player player = event.getPlayer();
-                RegisteredServiceProvider<Economy> rsp = sm.getRegistration(Economy.class);
-                if (rsp != null && rsp.getProvider() instanceof OptimizedEconomy) {
-                    OptimizedEconomy econ = (OptimizedEconomy) rsp.getProvider();
-                    econ.onPlayerJoin(player);
+                for (OptimizedEconomy econ : wrappedEconomies) {
+                    if (econ != null) {
+                        econ.onPlayerJoin(player);
+                    }
                 }
             }
 
@@ -807,7 +810,7 @@ public class Vault extends JavaPlugin {
 
     private static final java.util.List<OptimizedEconomy> wrappedEconomies = new java.util.concurrent.CopyOnWriteArrayList<>();
 
-    private void wrapAndRegisterEconomyFallback() {
+    private void createAndRegisterWrapper(Economy delegate, ServicePriority priority) {
         boolean useCache = getConfig().getBoolean("economy.use-cache", true);
         boolean debugTransactions = getConfig().getBoolean("economy.debug-transactions", false);
 
@@ -817,9 +820,9 @@ public class Vault extends JavaPlugin {
 
         boolean nativeBanks = getConfig().getBoolean("banks.native-redis.enabled", true);
 
-        // Shutdown any previous fallback wrapper
+        // Shutdown any previous wrapper for this delegate
         wrappedEconomies.removeIf(econ -> {
-            if (econ.getDelegate() == null) {
+            if (econ.getDelegate() == delegate) {
                 try {
                     econ.shutdown();
                 } catch (Exception ignored) {}
@@ -828,15 +831,20 @@ public class Vault extends JavaPlugin {
             return false;
         });
 
-        OptimizedEconomy wrapped = new OptimizedEconomy(this, null, useCache, debugTransactions, rateLimiterEnabled,
+        OptimizedEconomy wrapped = new OptimizedEconomy(this, delegate, useCache, debugTransactions, rateLimiterEnabled,
                 maxTps, cooldown, nativeBanks);
         wrappedEconomies.add(wrapped);
-        sm.register(Economy.class, wrapped, this, ServicePriority.Lowest);
-        sm.register(MultiCurrencyEconomy.class, wrapped, this, ServicePriority.Lowest);
-        sm.register(net.milkbowl.vault.economy.VaultAuctionAPI.class, wrapped, this, ServicePriority.Lowest);
-        sm.register(net.milkbowl.vault.economy.VaultStakingAPI.class, wrapped, this, ServicePriority.Lowest);
-        sm.register(net.milkbowl.vault.economy.VaultTaxAPI.class, wrapped, this, ServicePriority.Lowest);
-        sm.register(net.milkbowl.vault.economy.VaultCreditAPI.class, wrapped, this, ServicePriority.Lowest);
+
+        sm.register(Economy.class, wrapped, this, priority);
+        sm.register(MultiCurrencyEconomy.class, wrapped, this, priority);
+        sm.register(net.milkbowl.vault.economy.VaultAuctionAPI.class, wrapped, this, priority);
+        sm.register(net.milkbowl.vault.economy.VaultStakingAPI.class, wrapped, this, priority);
+        sm.register(net.milkbowl.vault.economy.VaultTaxAPI.class, wrapped, this, priority);
+        sm.register(net.milkbowl.vault.economy.VaultCreditAPI.class, wrapped, this, priority);
+    }
+
+    private void wrapAndRegisterEconomyFallback() {
+        createAndRegisterWrapper(null, ServicePriority.Lowest);
     }
 
     private void wrapExistingEconomies() {
@@ -849,37 +857,7 @@ public class Vault extends JavaPlugin {
     }
 
     private void wrapAndRegisterEconomy(Economy original) {
-        boolean useCache = getConfig().getBoolean("economy.use-cache", true);
-        boolean debugTransactions = getConfig().getBoolean("economy.debug-transactions", false);
-
-        boolean rateLimiterEnabled = getConfig().getBoolean("security.rate-limiter.enabled", true);
-        int maxTps = getConfig().getInt("security.rate-limiter.max-transactions-per-second", 20);
-        int cooldown = getConfig().getInt("security.rate-limiter.cooldown-seconds", 5);
-
-        boolean nativeBanks = getConfig().getBoolean("banks.native-redis.enabled", true);
-
-        // Shutdown any previous wrapper for this delegate
-        wrappedEconomies.removeIf(econ -> {
-            if (econ.getDelegate() == original) {
-                try {
-                    econ.shutdown();
-                } catch (Exception ignored) {}
-                return true;
-            }
-            return false;
-        });
-
-        OptimizedEconomy wrapped = new OptimizedEconomy(this, original, useCache, debugTransactions, rateLimiterEnabled,
-                maxTps, cooldown, nativeBanks);
-        wrappedEconomies.add(wrapped);
-        // Force register with highest possible priority to secure the primary routing
-        // spot
-        sm.register(Economy.class, wrapped, this, ServicePriority.Highest);
-        sm.register(MultiCurrencyEconomy.class, wrapped, this, ServicePriority.Highest);
-        sm.register(net.milkbowl.vault.economy.VaultAuctionAPI.class, wrapped, this, ServicePriority.Highest);
-        sm.register(net.milkbowl.vault.economy.VaultStakingAPI.class, wrapped, this, ServicePriority.Highest);
-        sm.register(net.milkbowl.vault.economy.VaultTaxAPI.class, wrapped, this, ServicePriority.Highest);
-        sm.register(net.milkbowl.vault.economy.VaultCreditAPI.class, wrapped, this, ServicePriority.Highest);
+        createAndRegisterWrapper(original, ServicePriority.Highest);
     }
 
     private void loadMessagesConfig() {

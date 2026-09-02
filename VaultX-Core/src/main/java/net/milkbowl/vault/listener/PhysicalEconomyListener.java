@@ -64,11 +64,15 @@ public class PhysicalEconomyListener implements Listener {
                     double fee = plugin.getConfig().getDouble("atms.transaction-fee", 0.0);
                     if (fee > 0) {
                         Economy econ = getEconomy();
-                        if (econ != null && econ.getBalance(player) >= fee) {
-                            econ.withdrawPlayer(player, fee);
-                            player.sendMessage(Vault.getMessage("atms.fee-deducted", "§7An ATM transaction fee of §e%fee% §7was deducted.")
-                                    .replace("%fee%", econ.format(fee)));
+                        if (econ == null || econ.getBalance(player) < fee) {
+                            String feeFormatted = econ != null ? econ.format(fee) : String.valueOf(fee);
+                            player.sendMessage(Vault.getMessage("atms.insufficient-fee", "§cYou do not have enough funds to pay the ATM fee of §e%fee%§c.")
+                                    .replace("%fee%", feeFormatted));
+                            return;
                         }
+                        econ.withdrawPlayer(player, fee);
+                        player.sendMessage(Vault.getMessage("atms.fee-deducted", "§7An ATM transaction fee of §e%fee% §7was deducted.")
+                                .replace("%fee%", econ.format(fee)));
                     }
                     if (Vault.getVaultXGUI() != null) {
                         Vault.getVaultXGUI().openDashboard(player);
@@ -122,7 +126,7 @@ public class PhysicalEconomyListener implements Listener {
                                 LocalFailoverManager fm = Vault.getFailoverManager();
                                 Economy econ = getEconomy();
                                 if (fm == null || econ == null) {
-                                    net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                                    net.milkbowl.vault.util.FoliaScheduler.runEntitySync(plugin, player, () -> {
                                         CLAIMING_CHECKS.remove(finalCheckId);
                                         restoreCheckItem(player, itemToRestore);
                                         if (player.isOnline()) {
@@ -134,8 +138,11 @@ public class PhysicalEconomyListener implements Listener {
 
                                 LocalCheckRecord check = fm.getCheck(finalCheckId);
 
-                                if (check == null || !check.status.equalsIgnoreCase("ACTIVE")) {
-                                    net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                                int expDays = plugin.getConfig().getInt("checks.expiration-days", 30);
+                                boolean isExpired = expDays > 0 && check != null && check.createdAt > 0 && (System.currentTimeMillis() > (check.createdAt + expDays * 86400000L));
+
+                                if (check == null || !check.status.equalsIgnoreCase("ACTIVE") || isExpired) {
+                                    net.milkbowl.vault.util.FoliaScheduler.runEntitySync(plugin, player, () -> {
                                         CLAIMING_CHECKS.remove(finalCheckId);
                                         restoreCheckItem(player, itemToRestore);
                                         if (player.isOnline()) {
@@ -149,8 +156,8 @@ public class PhysicalEconomyListener implements Listener {
                                 // Update check status in database first to prevent race conditions
                                 fm.updateCheckStatus(finalCheckId, "CLAIMED");
 
-                                // Perform deposit on the main thread
-                                net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                                // Perform deposit on the player entity thread
+                                net.milkbowl.vault.util.FoliaScheduler.runEntitySync(plugin, player, () -> {
                                     EconomyResponse depRes;
                                     if (check.currency.equalsIgnoreCase("default")) {
                                         depRes = econ.depositPlayer(player, check.amount);
@@ -185,7 +192,7 @@ public class PhysicalEconomyListener implements Listener {
                                         final String errMsg = depRes.errorMessage;
                                         net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
                                             fm.updateCheckStatus(finalCheckId, "ACTIVE");
-                                            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                                            net.milkbowl.vault.util.FoliaScheduler.runEntitySync(plugin, player, () -> {
                                                 CLAIMING_CHECKS.remove(finalCheckId);
                                                 restoreCheckItem(player, itemToRestore);
                                                 if (player.isOnline()) {
@@ -198,7 +205,7 @@ public class PhysicalEconomyListener implements Listener {
                                     }
                                 });
                             } catch (Exception e) {
-                                net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                                net.milkbowl.vault.util.FoliaScheduler.runEntitySync(plugin, player, () -> {
                                     CLAIMING_CHECKS.remove(finalCheckId);
                                     restoreCheckItem(player, itemToRestore);
                                     if (player.isOnline()) {
@@ -261,12 +268,24 @@ public class PhysicalEconomyListener implements Listener {
     }
 
     private static final java.lang.reflect.Method GET_HAND_METHOD;
+    private static final java.lang.reflect.Method SET_MAIN_HAND_METHOD;
+    private static final java.lang.reflect.Method SET_OFF_HAND_METHOD;
+
     static {
-        java.lang.reflect.Method m = null;
+        java.lang.reflect.Method getHand = null;
+        java.lang.reflect.Method setMain = null;
+        java.lang.reflect.Method setOff = null;
         try {
-            m = PlayerInteractEvent.class.getMethod("getHand");
+            getHand = PlayerInteractEvent.class.getMethod("getHand");
         } catch (Throwable ignored) {}
-        GET_HAND_METHOD = m;
+        try {
+            Class<?> invClass = org.bukkit.inventory.PlayerInventory.class;
+            setMain = invClass.getMethod("setItemInMainHand", ItemStack.class);
+            setOff = invClass.getMethod("setItemInOffHand", ItemStack.class);
+        } catch (Throwable ignored) {}
+        GET_HAND_METHOD = getHand;
+        SET_MAIN_HAND_METHOD = setMain;
+        SET_OFF_HAND_METHOD = setOff;
     }
 
     private String getEventHandName(PlayerInteractEvent event) {
@@ -282,39 +301,26 @@ public class PhysicalEconomyListener implements Listener {
     private void removeOneHandItem(Player player, String handName, ItemStack item) {
         boolean isOffhand = "OFF_HAND".equals(handName);
         int amount = item.getAmount();
-        if (amount > 1) {
-            item.setAmount(amount - 1);
-            if (isOffhand) {
-                try {
-                    Object inv = player.getInventory();
-                    java.lang.reflect.Method m = inv.getClass().getMethod("setItemInOffHand", ItemStack.class);
-                    m.invoke(inv, item);
-                    return;
-                } catch (Throwable ignored) {}
-            } else {
-                try {
-                    Object inv = player.getInventory();
-                    java.lang.reflect.Method m = inv.getClass().getMethod("setItemInMainHand", ItemStack.class);
-                    m.invoke(inv, item);
-                } catch (Throwable ignored) {}
-            }
-        } else {
-            if (isOffhand) {
-                try {
-                    Object inv = player.getInventory();
-                    java.lang.reflect.Method m = inv.getClass().getMethod("setItemInOffHand", ItemStack.class);
-                    m.invoke(inv, (Object) null);
-                    return;
-                } catch (Throwable ignored) {}
-            }
-            try {
-                Object inv = player.getInventory();
-                java.lang.reflect.Method m = inv.getClass().getMethod("setItemInMainHand", ItemStack.class);
-                m.invoke(inv, (Object) null);
-            } catch (Throwable e) {
-                player.setItemInHand(null);
-            }
+        ItemStack targetItem = amount > 1 ? item.clone() : null;
+        if (targetItem != null) {
+            targetItem.setAmount(amount - 1);
         }
+
+        if (isOffhand && SET_OFF_HAND_METHOD != null) {
+            try {
+                SET_OFF_HAND_METHOD.invoke(player.getInventory(), targetItem);
+                return;
+            } catch (Throwable ignored) {}
+        }
+
+        if (SET_MAIN_HAND_METHOD != null) {
+            try {
+                SET_MAIN_HAND_METHOD.invoke(player.getInventory(), targetItem);
+                return;
+            } catch (Throwable ignored) {}
+        }
+
+        player.setItemInHand(targetItem);
     }
 
     @EventHandler

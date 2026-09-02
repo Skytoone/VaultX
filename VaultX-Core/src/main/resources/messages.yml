@@ -399,7 +399,12 @@ checks:
 atm:
   created: "&a&l✔ &aAutomatic Teller Machine (ATM) successfully created."
 
+atms:
+  fee-deducted: "&cATM fee deducted: %fee%"
+
 escrow:
+  disabled: "&cEscrow transactions are currently disabled."
+  limit-exceeded: "&cYou have reached the maximum allowed active escrows (%limit%)."
   lock-active: "&cAccount lock active. Please try again."
   insufficient-funds: "&cYou do not have enough funds or the transaction failed."
   started: "&aEscrow transaction successfully started."
@@ -432,6 +437,7 @@ dividends:
 # =======================================================
 discord:
   link-code-generated: "&a&l[Discord] &fYour verification link code is: &e&l%code% &7(expires in %expire% minutes)."
+  link-code-ratelimit: "&c[Discord] Please wait before generating another link code."
   link-usage: "&cUsage: /vx discord link OR /vx discord status"
   already-linked: "&a&l[Discord] &fYour Minecraft account is already linked to Discord tag: &e%tag%&f."
   link-success: "&a&l[Discord] &fAccount successfully linked with Discord user &e%tag%&a!"

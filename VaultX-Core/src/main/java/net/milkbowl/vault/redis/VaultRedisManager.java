@@ -95,7 +95,7 @@ public class VaultRedisManager {
         config.setMaxIdle(maxConnections);
         config.setMinIdle(Math.max(2, maxConnections / 4));
         config.setBlockWhenExhausted(true);
-        config.setMaxWait(java.time.Duration.ofMillis(250));
+        config.setMaxWait(java.time.Duration.ofMillis(timeoutMs));
 
         if (password != null && !password.isEmpty()) {
             this.pool = new JedisPool(config, host, port, timeoutMs, password);

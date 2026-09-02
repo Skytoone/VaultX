@@ -42,10 +42,36 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
 
     public BlackMarketManager(Plugin plugin) {
         this.plugin = plugin;
+        loadAllFromDb();
+    }
+
+    private void loadAllFromDb() {
+        net.milkbowl.vault.redis.LocalFailoverManager fm = net.milkbowl.vault.Vault.getFailoverManager();
+        if (fm != null) {
+            Map<UUID, Double> loaded = fm.loadAllDirtyBalances();
+            if (loaded != null && !loaded.isEmpty()) {
+                dirtyBalances.putAll(loaded);
+            }
+        }
+    }
+
+    private void saveDirtyBalance(UUID uuid, double amount) {
+        net.milkbowl.vault.redis.LocalFailoverManager fm = net.milkbowl.vault.Vault.getFailoverManager();
+        if (fm != null && uuid != null) {
+            fm.saveDirtyBalance(uuid, amount);
+        }
     }
 
     public String getMode() {
         return plugin.getConfig().getString("blackmarket.dirty-money-mode", "CURRENCY").toUpperCase();
+    }
+
+    private double getOrLoadDirtyBalance(UUID uuid) {
+        if (uuid == null) return 0.0;
+        return dirtyBalances.computeIfAbsent(uuid, k -> {
+            net.milkbowl.vault.redis.LocalFailoverManager fm = net.milkbowl.vault.Vault.getFailoverManager();
+            return fm != null ? fm.loadDirtyBalanceForPlayer(k) : 0.0;
+        });
     }
 
     public double getDirtyBalance(Player player) {
@@ -54,7 +80,7 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
         if (getMode().equals("ITEM")) {
             return countDirtyItems(player);
         } else {
-            return dirtyBalances.getOrDefault(player.getUniqueId(), 0.0);
+            return getOrLoadDirtyBalance(player.getUniqueId());
         }
     }
 
@@ -65,28 +91,33 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
         if (player.isOnline() && player.getPlayer() != null) {
             return getDirtyBalance(player.getPlayer());
         }
-        return dirtyBalances.getOrDefault(player.getUniqueId(), 0.0);
+        return getOrLoadDirtyBalance(player.getUniqueId());
     }
 
     @Override
     public void setDirtyBalance(OfflinePlayer player, double amount) {
-        if (player == null)
+        if (player == null || Double.isNaN(amount) || Double.isInfinite(amount))
             return;
-        dirtyBalances.put(player.getUniqueId(), Math.max(0.0, amount));
+        double val = Math.max(0.0, amount);
+        dirtyBalances.put(player.getUniqueId(), val);
+        saveDirtyBalance(player.getUniqueId(), val);
     }
 
     public void depositDirty(Player player, double amount) {
-        if (player == null || amount <= 0)
+        if (player == null || Double.isNaN(amount) || Double.isInfinite(amount) || amount <= 0)
             return;
         if (getMode().equals("ITEM")) {
             giveDirtyItem(player, amount);
         } else {
-            dirtyBalances.merge(player.getUniqueId(), amount, Double::sum);
+            double current = getOrLoadDirtyBalance(player.getUniqueId());
+            double val = current + amount;
+            dirtyBalances.put(player.getUniqueId(), val);
+            saveDirtyBalance(player.getUniqueId(), val);
         }
     }
 
     public boolean withdrawDirty(Player player, double amount) {
-        if (player == null || amount <= 0)
+        if (player == null || Double.isNaN(amount) || Double.isInfinite(amount) || amount <= 0)
             return false;
         double current = getDirtyBalance(player);
         if (current < amount)
@@ -95,19 +126,24 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
         if (getMode().equals("ITEM")) {
             return removeDirtyItems(player, amount);
         } else {
-            dirtyBalances.put(player.getUniqueId(), current - amount);
+            double val = current - amount;
+            dirtyBalances.put(player.getUniqueId(), val);
+            saveDirtyBalance(player.getUniqueId(), val);
             return true;
         }
     }
 
     @Override
     public void addDirtyMoney(OfflinePlayer player, double amount) {
-        if (player == null || amount <= 0)
+        if (player == null || Double.isNaN(amount) || Double.isInfinite(amount) || amount <= 0)
             return;
-        if (player.isOnline() && player.getPlayer() != null) {
-            depositDirty(player.getPlayer(), amount);
+        if (player.isOnline() && player.getPlayer() != null && getMode().equals("ITEM")) {
+            giveDirtyItem(player.getPlayer(), amount);
         } else {
-            dirtyBalances.merge(player.getUniqueId(), amount, Double::sum);
+            double current = getOrLoadDirtyBalance(player.getUniqueId());
+            double val = current + amount;
+            dirtyBalances.put(player.getUniqueId(), val);
+            saveDirtyBalance(player.getUniqueId(), val);
         }
     }
 
@@ -139,6 +175,11 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
 
         // Synchronized per-player to prevent race condition / double-spend exploit
         synchronized (getPlayerLock(player.getUniqueId())) {
+            if (getMode().equals("ITEM")) {
+                int items = (int) Math.ceil(dirtyAmount / 100.0);
+                dirtyAmount = items * 100.0;
+            }
+
             double currentDirty = getDirtyBalance(player);
             if (currentDirty < dirtyAmount) {
                 return new LaunderingResult(false, false, 0, 0, 0);
@@ -191,34 +232,42 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
         if (mat == null)
             mat = Material.PAPER;
 
-        int itemCount = Math.max(1, (int) Math.round(amount / 100.0));
-        ItemStack item = new ItemStack(mat, itemCount);
-        ItemMeta meta = item.getItemMeta();
-        if (meta != null) {
-            String title = plugin.getConfig().getString("blackmarket.item.name", "&c&lMarked Dirty Money");
-            meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', title));
-            List<String> rawLore = plugin.getConfig().getStringList("blackmarket.item.lore");
-            List<String> lore = new ArrayList<>();
-            for (String l : rawLore) {
-                lore.add(ChatColor.translateAlternateColorCodes('&', l));
-            }
-            // Append hidden marker lore line to prevent rename exploits via anvil
-            lore.add(DIRTY_LORE_MARKER);
-            meta.setLore(lore);
-            int cmd = plugin.getConfig().getInt("blackmarket.item.custom-model-data", 1001);
-            if (cmd > 0) {
-                try {
-                    java.lang.reflect.Method m = meta.getClass().getMethod("setCustomModelData", Integer.class);
-                    m.invoke(meta, cmd);
-                } catch (Throwable ignored) {
-                }
-            }
-            item.setItemMeta(meta);
-        }
+        int itemCount = (int) Math.floor(amount / 100.0);
+        if (itemCount <= 0) return;
 
-        Map<Integer, ItemStack> leftover = player.getInventory().addItem(item);
-        for (ItemStack left : leftover.values()) {
-            player.getWorld().dropItemNaturally(player.getLocation(), left);
+        int maxStack = mat.getMaxStackSize() > 0 ? mat.getMaxStackSize() : 64;
+
+        while (itemCount > 0) {
+            int stackSize = Math.min(itemCount, maxStack);
+            ItemStack item = new ItemStack(mat, stackSize);
+            ItemMeta meta = item.getItemMeta();
+            if (meta != null) {
+                String title = plugin.getConfig().getString("blackmarket.item.name", "&c&lMarked Dirty Money");
+                meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', title));
+                List<String> rawLore = plugin.getConfig().getStringList("blackmarket.item.lore");
+                List<String> lore = new ArrayList<>();
+                for (String l : rawLore) {
+                    lore.add(ChatColor.translateAlternateColorCodes('&', l));
+                }
+                // Append hidden marker lore line to prevent rename exploits via anvil
+                lore.add(DIRTY_LORE_MARKER);
+                meta.setLore(lore);
+                int cmd = plugin.getConfig().getInt("blackmarket.item.custom-model-data", 1001);
+                if (cmd > 0) {
+                    try {
+                        java.lang.reflect.Method m = meta.getClass().getMethod("setCustomModelData", Integer.class);
+                        m.invoke(meta, cmd);
+                    } catch (Throwable ignored) {
+                    }
+                }
+                item.setItemMeta(meta);
+            }
+
+            Map<Integer, ItemStack> leftover = player.getInventory().addItem(item);
+            for (ItemStack left : leftover.values()) {
+                player.getWorld().dropItemNaturally(player.getLocation(), left);
+            }
+            itemCount -= stackSize;
         }
     }
 
@@ -228,7 +277,14 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
         if (mat == null)
             mat = Material.PAPER;
 
-        int itemsToRemove = Math.max(1, (int) Math.round(amount / 100.0));
+        int itemsToRemove = (int) Math.ceil(amount / 100.0);
+        if (itemsToRemove <= 0) return false;
+
+        // Ensure player has sufficient total items before modifying inventory
+        if (countDirtyItems(player) < itemsToRemove * 100.0) {
+            return false;
+        }
+
         ItemStack[] contents = player.getInventory().getContents();
         for (int i = 0; i < contents.length; i++) {
             ItemStack item = contents[i];
@@ -264,11 +320,21 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
 
     public void cleanupPlayer(UUID uuid) {
         if (uuid != null) {
+            Double amount = dirtyBalances.get(uuid);
+            if (amount != null) {
+                saveDirtyBalance(uuid, amount);
+            }
             dirtyBalances.remove(uuid);
         }
     }
 
     public void close() {
+        net.milkbowl.vault.redis.LocalFailoverManager fm = net.milkbowl.vault.Vault.getFailoverManager();
+        if (fm != null) {
+            for (Map.Entry<UUID, Double> entry : dirtyBalances.entrySet()) {
+                fm.saveDirtyBalance(entry.getKey(), entry.getValue());
+            }
+        }
         dirtyBalances.clear();
     }
 }

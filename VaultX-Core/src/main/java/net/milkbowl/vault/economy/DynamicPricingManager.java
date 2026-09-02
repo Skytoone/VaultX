@@ -160,22 +160,34 @@ public class DynamicPricingManager {
     }
 
     private double calculateMoneySupply(String currency) {
-        double supply = 0.0;
+        final java.util.concurrent.atomic.DoubleAdder onlineSupplyAdder = new java.util.concurrent.atomic.DoubleAdder();
         RegisteredServiceProvider<Economy> rsp = Bukkit.getServicesManager().getRegistration(Economy.class);
         Economy econ = rsp != null ? rsp.getProvider() : null;
 
         if (econ != null) {
-            // Sum balances for all online players
-            for (Player player : Bukkit.getOnlinePlayers()) {
+            java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+            FoliaScheduler.runSync(plugin, () -> {
                 try {
-                    if (currency.equalsIgnoreCase("default")) {
-                        supply += Math.max(0.0, econ.getBalance(player));
-                    } else if (econ instanceof MultiCurrencyEconomy) {
-                        supply += Math.max(0.0, ((MultiCurrencyEconomy) econ).getCurrencyBalance(player, currency));
+                    for (Player player : Bukkit.getOnlinePlayers()) {
+                        try {
+                            if (currency.equalsIgnoreCase("default")) {
+                                onlineSupplyAdder.add(Math.max(0.0, econ.getBalance(player)));
+                            } else if (econ instanceof MultiCurrencyEconomy) {
+                                onlineSupplyAdder.add(Math.max(0.0, ((MultiCurrencyEconomy) econ).getCurrencyBalance(player, currency)));
+                            }
+                        } catch (Throwable ignored) {}
                     }
-                } catch (Throwable ignored) {}
+                } finally {
+                    latch.countDown();
+                }
+            });
+            try {
+                latch.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
         }
+        double supply = onlineSupplyAdder.sum();
 
         // Query database failover manager for offline/total balance sum if available
         LocalFailoverManager failover = Vault.getFailoverManager();

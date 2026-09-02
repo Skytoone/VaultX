@@ -16,8 +16,12 @@ import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
-import net.milkbowl.vault.economy.VaultSnapshotAPI;
 import net.milkbowl.vault.economy.VaultSnapshotAPI.EconomySnapshot;
+import net.milkbowl.vault.economy.VaultAuctionAPI;
+import net.milkbowl.vault.economy.VaultStakingAPI;
+import net.milkbowl.vault.economy.VaultCreditAPI;
+import net.milkbowl.vault.util.ItemSerializer;
+import org.bukkit.inventory.ItemStack;
 
 public class LocalFailoverManager {
 
@@ -51,7 +55,14 @@ public class LocalFailoverManager {
         R apply(Connection conn) throws SQLException;
     }
 
+    private static LocalFailoverManager instance;
+
+    public static LocalFailoverManager getInstance() {
+        return instance;
+    }
+
     public LocalFailoverManager(Plugin plugin) {
+        instance = this;
         this.plugin = plugin;
         int maxQueueCapacity = plugin.getConfig().getInt("advanced.batch-queue-limit", 50000);
         this.transactionQueue = new LinkedBlockingQueue<>(maxQueueCapacity);
@@ -226,6 +237,9 @@ public class LocalFailoverManager {
     }
 
     public void close() {
+        if (instance == this) {
+            instance = null;
+        }
         running = false;
         if (batchWriterThread != null) {
             batchWriterThread.interrupt();
@@ -430,6 +444,59 @@ public class LocalFailoverManager {
                         "currency VARCHAR(32) NOT NULL, " +
                         "balance DOUBLE NOT NULL, " +
                         "PRIMARY KEY (snapshot_id, uuid, currency))");
+
+                // Table for crypto wallets
+                stmt.execute("CREATE TABLE IF NOT EXISTS crypto_wallets (" +
+                        "uuid VARCHAR(36) NOT NULL, " +
+                        "crypto_name VARCHAR(32) NOT NULL, " +
+                        "balance DOUBLE NOT NULL, " +
+                        "PRIMARY KEY (uuid, crypto_name))");
+
+                // Table for active auctions
+                stmt.execute("CREATE TABLE IF NOT EXISTS local_auctions (" +
+                        "auction_id VARCHAR(64) PRIMARY KEY, " +
+                        "seller_uuid VARCHAR(36) NOT NULL, " +
+                        "item_data TEXT NOT NULL, " +
+                        "currency VARCHAR(32) NOT NULL, " +
+                        "starting_price DOUBLE NOT NULL, " +
+                        "current_bid DOUBLE NOT NULL, " +
+                        "highest_bidder_uuid VARCHAR(36), " +
+                        "duration_ms " + bigintType + " NOT NULL, " +
+                        "expires_at_ms " + bigintType + " NOT NULL, " +
+                        "is_closed INT NOT NULL)");
+
+                // Table for pending auction item claims
+                stmt.execute("CREATE TABLE IF NOT EXISTS local_pending_auction_items (" +
+                        "id INTEGER PRIMARY KEY " + ((!isMySQL && !isPostgreSQL) ? "AUTOINCREMENT" : (isPostgreSQL ? "GENERATED ALWAYS AS IDENTITY" : "AUTO_INCREMENT")) + ", " +
+                        "uuid VARCHAR(36) NOT NULL, " +
+                        "item_data TEXT NOT NULL)");
+
+                // Table for active stakes
+                stmt.execute("CREATE TABLE IF NOT EXISTS local_stakes (" +
+                        "deposit_id VARCHAR(64) PRIMARY KEY, " +
+                        "player_uuid VARCHAR(36) NOT NULL, " +
+                        "currency VARCHAR(32) NOT NULL, " +
+                        "principal DOUBLE NOT NULL, " +
+                        "interest_rate DOUBLE NOT NULL, " +
+                        "staked_at_ms " + bigintType + " NOT NULL, " +
+                        "lock_period_ms " + bigintType + " NOT NULL, " +
+                        "is_matured INT NOT NULL, " +
+                        "is_claimed INT NOT NULL)");
+
+                // Table for credit accounts
+                stmt.execute("CREATE TABLE IF NOT EXISTS local_credit_accounts (" +
+                        "uuid VARCHAR(36) NOT NULL, " +
+                        "currency VARCHAR(32) NOT NULL, " +
+                        "overdraft_limit DOUBLE NOT NULL, " +
+                        "current_used_credit DOUBLE NOT NULL, " +
+                        "credit_score INT NOT NULL, " +
+                        "is_frozen INT NOT NULL, " +
+                        "PRIMARY KEY (uuid, currency))");
+
+                // Table for Black Market dirty balances
+                stmt.execute("CREATE TABLE IF NOT EXISTS dirty_balances (" +
+                        "uuid VARCHAR(36) PRIMARY KEY, " +
+                        "amount DOUBLE NOT NULL)");
 
                 // Schema migrations
                 try {
@@ -1283,6 +1350,22 @@ public class LocalFailoverManager {
                 }
             }, "Failed to prune old history records");
         }
+
+        // Prune unclaimed mailbox records older than mailbox.retention-days
+        int mailboxRetentionDays = plugin.getConfig().getInt("mailbox.retention-days", 60);
+        if (mailboxRetentionDays > 0) {
+            long mailCutoff = now - (mailboxRetentionDays * 24L * 60L * 60L * 1000L);
+            executeDatabaseOperation(conn -> {
+                String pruneMail = "DELETE FROM player_mailbox WHERE status = 'PENDING' AND timestamp < ?";
+                try (PreparedStatement pstmt = conn.prepareStatement(pruneMail)) {
+                    pstmt.setLong(1, mailCutoff);
+                    int deleted = pstmt.executeUpdate();
+                    if (deleted > 0) {
+                        plugin.getLogger().info("[Vault Failover] Pruned " + deleted + " expired mailbox records older than " + mailboxRetentionDays + " days.");
+                    }
+                }
+            }, "Failed to prune expired mailbox records");
+        }
     }
 
     public void savePendingWebhook(String payload, int attempts, long nextRetry) {
@@ -1952,12 +2035,17 @@ public class LocalFailoverManager {
         public final String currency;
         public final UUID creatorUuid;
         public final String status;
-        public LocalCheckRecord(String id, double amount, String currency, UUID creatorUuid, String status) {
+        public final long createdAt;
+        public LocalCheckRecord(String id, double amount, String currency, UUID creatorUuid, String status, long createdAt) {
             this.id = id;
             this.amount = amount;
             this.currency = currency;
             this.creatorUuid = creatorUuid;
             this.status = status;
+            this.createdAt = createdAt;
+        }
+        public LocalCheckRecord(String id, double amount, String currency, UUID creatorUuid, String status) {
+            this(id, amount, currency, creatorUuid, status, 0L);
         }
     }
 
@@ -2709,6 +2797,369 @@ public class LocalFailoverManager {
                 return true;
             }
         }, false, "Failed to delete snapshot");
+    }
+
+    // ========================================================
+    //      Crypto Wallets Persistence
+    // ========================================================
+
+    public void saveCryptoWallet(UUID uuid, String cryptoName, double amount) {
+        String sql = isPostgreSQL ?
+                "INSERT INTO crypto_wallets (uuid, crypto_name, balance) VALUES (?, ?, ?) ON CONFLICT (uuid, crypto_name) DO UPDATE SET balance = EXCLUDED.balance" :
+                (isMySQL ? "INSERT INTO crypto_wallets (uuid, crypto_name, balance) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE balance = VALUES(balance)" :
+                        "REPLACE INTO crypto_wallets (uuid, crypto_name, balance) VALUES (?, ?, ?)");
+        executeDatabaseOperation(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, uuid.toString());
+                ps.setString(2, cryptoName);
+                ps.setDouble(3, amount);
+                ps.executeUpdate();
+            }
+        }, "Failed to save crypto wallet");
+    }
+
+    public void deleteCryptoWallet(UUID uuid, String cryptoName) {
+        String sql = "DELETE FROM crypto_wallets WHERE uuid = ? AND crypto_name = ?";
+        executeDatabaseOperation(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, uuid.toString());
+                ps.setString(2, cryptoName);
+                ps.executeUpdate();
+            }
+        }, "Failed to delete crypto wallet");
+    }
+
+    public Map<UUID, Map<String, Double>> loadAllCryptoWallets() {
+        String query = "SELECT uuid, crypto_name, balance FROM crypto_wallets";
+        return executeDatabaseQuery(conn -> {
+            Map<UUID, Map<String, Double>> result = new HashMap<>();
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(query)) {
+                while (rs.next()) {
+                    try {
+                        UUID uuid = UUID.fromString(rs.getString("uuid"));
+                        String name = rs.getString("crypto_name");
+                        double bal = rs.getDouble("balance");
+                        result.computeIfAbsent(uuid, k -> new HashMap<>()).put(name, bal);
+                    } catch (Exception ignored) {}
+                }
+            }
+            return result;
+        }, new HashMap<>(), "Failed to load all crypto wallets");
+    }
+
+    // ========================================================
+    //      Active Auctions Persistence
+    // ========================================================
+
+    public void saveAuction(VaultAuctionAPI.AuctionListing listing) {
+        if (listing == null) return;
+        String sql = isPostgreSQL ?
+                "INSERT INTO local_auctions (auction_id, seller_uuid, item_data, currency, starting_price, current_bid, highest_bidder_uuid, duration_ms, expires_at_ms, is_closed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (auction_id) DO UPDATE SET current_bid = EXCLUDED.current_bid, highest_bidder_uuid = EXCLUDED.highest_bidder_uuid, is_closed = EXCLUDED.is_closed" :
+                (isMySQL ? "INSERT INTO local_auctions (auction_id, seller_uuid, item_data, currency, starting_price, current_bid, highest_bidder_uuid, duration_ms, expires_at_ms, is_closed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE current_bid = VALUES(current_bid), highest_bidder_uuid = VALUES(highest_bidder_uuid), is_closed = VALUES(is_closed)" :
+                        "REPLACE INTO local_auctions (auction_id, seller_uuid, item_data, currency, starting_price, current_bid, highest_bidder_uuid, duration_ms, expires_at_ms, is_closed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        executeDatabaseOperation(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, listing.auctionId());
+                ps.setString(2, listing.sellerUuid().toString());
+                ps.setString(3, ItemSerializer.serializeItem(listing.item()));
+                ps.setString(4, listing.currency());
+                ps.setDouble(5, listing.startingPrice());
+                ps.setDouble(6, listing.currentBid());
+                ps.setString(7, listing.highestBidderUuid() != null ? listing.highestBidderUuid().toString() : null);
+                ps.setLong(8, listing.durationMs());
+                ps.setLong(9, listing.expiresAtMs());
+                ps.setInt(10, listing.isClosed() ? 1 : 0);
+                ps.executeUpdate();
+            }
+        }, "Failed to save auction listing");
+    }
+
+    public void deleteAuction(String auctionId) {
+        String sql = "DELETE FROM local_auctions WHERE auction_id = ?";
+        executeDatabaseOperation(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, auctionId);
+                ps.executeUpdate();
+            }
+        }, "Failed to delete auction");
+    }
+
+    public Map<String, VaultAuctionAPI.AuctionListing> loadAllAuctions() {
+        String query = "SELECT auction_id, seller_uuid, item_data, currency, starting_price, current_bid, highest_bidder_uuid, duration_ms, expires_at_ms, is_closed FROM local_auctions WHERE is_closed = 0";
+        return executeDatabaseQuery(conn -> {
+            Map<String, VaultAuctionAPI.AuctionListing> result = new HashMap<>();
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(query)) {
+                while (rs.next()) {
+                    try {
+                        String id = rs.getString("auction_id");
+                        UUID seller = UUID.fromString(rs.getString("seller_uuid"));
+                        ItemStack item = ItemSerializer.deserializeItem(rs.getString("item_data"));
+                        String curr = rs.getString("currency");
+                        double startPrice = rs.getDouble("starting_price");
+                        double currentBid = rs.getDouble("current_bid");
+                        String hbStr = rs.getString("highest_bidder_uuid");
+                        UUID highestBidder = (hbStr != null && !hbStr.isEmpty()) ? UUID.fromString(hbStr) : null;
+                        long duration = rs.getLong("duration_ms");
+                        long expiresAt = rs.getLong("expires_at_ms");
+                        boolean isClosed = rs.getInt("is_closed") == 1;
+
+                        if (item != null) {
+                            result.put(id, new VaultAuctionAPI.AuctionListing(
+                                    id, seller, item, curr, startPrice, currentBid, highestBidder, duration, expiresAt, isClosed
+                            ));
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+            return result;
+        }, new HashMap<>(), "Failed to load active auctions");
+    }
+
+    public void savePendingAuctionItem(UUID uuid, ItemStack item) {
+        if (uuid == null || item == null) return;
+        String sql = "INSERT INTO local_pending_auction_items (uuid, item_data) VALUES (?, ?)";
+        executeDatabaseOperation(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, uuid.toString());
+                ps.setString(2, ItemSerializer.serializeItem(item));
+                ps.executeUpdate();
+            }
+        }, "Failed to save pending auction item");
+    }
+
+    public Map<UUID, List<ItemStack>> loadAllPendingAuctionItems() {
+        String query = "SELECT uuid, item_data FROM local_pending_auction_items";
+        return executeDatabaseQuery(conn -> {
+            Map<UUID, List<ItemStack>> result = new HashMap<>();
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(query)) {
+                while (rs.next()) {
+                    try {
+                        UUID uuid = UUID.fromString(rs.getString("uuid"));
+                        ItemStack item = ItemSerializer.deserializeItem(rs.getString("item_data"));
+                        if (item != null) {
+                            result.computeIfAbsent(uuid, k -> new ArrayList<>()).add(item);
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+            return result;
+        }, new HashMap<>(), "Failed to load pending auction items");
+    }
+
+    public void deletePendingAuctionItems(UUID uuid) {
+        if (uuid == null) return;
+        String sql = "DELETE FROM local_pending_auction_items WHERE uuid = ?";
+        executeDatabaseOperation(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, uuid.toString());
+                ps.executeUpdate();
+            }
+        }, "Failed to delete pending auction items");
+    }
+
+    // ========================================================
+    //      Active Stakes Persistence
+    // ========================================================
+
+    public void saveStake(VaultStakingAPI.StakeDeposit deposit) {
+        if (deposit == null) return;
+        String sql = isPostgreSQL ?
+                "INSERT INTO local_stakes (deposit_id, player_uuid, currency, principal, interest_rate, staked_at_ms, lock_period_ms, is_matured, is_claimed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (deposit_id) DO UPDATE SET is_matured = EXCLUDED.is_matured, is_claimed = EXCLUDED.is_claimed" :
+                (isMySQL ? "INSERT INTO local_stakes (deposit_id, player_uuid, currency, principal, interest_rate, staked_at_ms, lock_period_ms, is_matured, is_claimed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE is_matured = VALUES(is_matured), is_claimed = VALUES(is_claimed)" :
+                        "REPLACE INTO local_stakes (deposit_id, player_uuid, currency, principal, interest_rate, staked_at_ms, lock_period_ms, is_matured, is_claimed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        executeDatabaseOperation(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, deposit.depositId());
+                ps.setString(2, deposit.playerUuid().toString());
+                ps.setString(3, deposit.currency());
+                ps.setDouble(4, deposit.principal());
+                ps.setDouble(5, deposit.interestRate());
+                ps.setLong(6, deposit.stakedAtMs());
+                ps.setLong(7, deposit.lockPeriodMs());
+                ps.setInt(8, deposit.isMatured() ? 1 : 0);
+                ps.setInt(9, deposit.isClaimed() ? 1 : 0);
+                ps.executeUpdate();
+            }
+        }, "Failed to save stake deposit");
+    }
+
+    public Map<String, VaultStakingAPI.StakeDeposit> loadAllStakes() {
+        String query = "SELECT deposit_id, player_uuid, currency, principal, interest_rate, staked_at_ms, lock_period_ms, is_matured, is_claimed FROM local_stakes WHERE is_claimed = 0";
+        return executeDatabaseQuery(conn -> {
+            Map<String, VaultStakingAPI.StakeDeposit> result = new HashMap<>();
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(query)) {
+                while (rs.next()) {
+                    try {
+                        String id = rs.getString("deposit_id");
+                        UUID player = UUID.fromString(rs.getString("player_uuid"));
+                        String curr = rs.getString("currency");
+                        double principal = rs.getDouble("principal");
+                        double rate = rs.getDouble("interest_rate");
+                        long stakedAt = rs.getLong("staked_at_ms");
+                        long lockPeriod = rs.getLong("lock_period_ms");
+                        boolean matured = rs.getInt("is_matured") == 1;
+                        boolean claimed = rs.getInt("is_claimed") == 1;
+
+                        result.put(id, new VaultStakingAPI.StakeDeposit(
+                                id, player, curr, principal, rate, stakedAt, lockPeriod, matured, claimed
+                        ));
+                    } catch (Exception ignored) {}
+                }
+            }
+            return result;
+        }, new HashMap<>(), "Failed to load active stakes");
+    }
+
+    // ========================================================
+    //      Credit Accounts Persistence
+    // ========================================================
+
+    public void saveCreditAccount(VaultCreditAPI.CreditAccount account) {
+        if (account == null) return;
+        String sql = isPostgreSQL ?
+                "INSERT INTO local_credit_accounts (uuid, currency, overdraft_limit, current_used_credit, credit_score, is_frozen) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (uuid, currency) DO UPDATE SET overdraft_limit = EXCLUDED.overdraft_limit, current_used_credit = EXCLUDED.current_used_credit, credit_score = EXCLUDED.credit_score, is_frozen = EXCLUDED.is_frozen" :
+                (isMySQL ? "INSERT INTO local_credit_accounts (uuid, currency, overdraft_limit, current_used_credit, credit_score, is_frozen) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE overdraft_limit = VALUES(overdraft_limit), current_used_credit = VALUES(current_used_credit), credit_score = VALUES(credit_score), is_frozen = VALUES(is_frozen)" :
+                        "REPLACE INTO local_credit_accounts (uuid, currency, overdraft_limit, current_used_credit, credit_score, is_frozen) VALUES (?, ?, ?, ?, ?, ?)");
+        executeDatabaseOperation(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, account.playerUuid().toString());
+                ps.setString(2, account.currency());
+                ps.setDouble(3, account.overdraftLimit());
+                ps.setDouble(4, account.currentUsedCredit());
+                ps.setInt(5, account.creditScore());
+                ps.setInt(6, account.isFrozen() ? 1 : 0);
+                ps.executeUpdate();
+            }
+        }, "Failed to save credit account");
+    }
+
+    public Map<UUID, Map<String, VaultCreditAPI.CreditAccount>> loadAllCreditAccounts() {
+        String query = "SELECT uuid, currency, overdraft_limit, current_used_credit, credit_score, is_frozen FROM local_credit_accounts";
+        return executeDatabaseQuery(conn -> {
+            Map<UUID, Map<String, VaultCreditAPI.CreditAccount>> result = new HashMap<>();
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(query)) {
+                while (rs.next()) {
+                    try {
+                        UUID uuid = UUID.fromString(rs.getString("uuid"));
+                        String curr = rs.getString("currency");
+                        double limit = rs.getDouble("overdraft_limit");
+                        double used = rs.getDouble("current_used_credit");
+                        int score = rs.getInt("credit_score");
+                        boolean frozen = rs.getInt("is_frozen") == 1;
+
+                        VaultCreditAPI.CreditAccount acc = new VaultCreditAPI.CreditAccount(uuid, curr, limit, used, score, frozen);
+                        result.computeIfAbsent(uuid, k -> new HashMap<>()).put(curr, acc);
+                    } catch (Exception ignored) {}
+                }
+            }
+            return result;
+        }, new HashMap<>(), "Failed to load all credit accounts");
+    }
+
+    // ========================================================
+    //      Black Market Dirty Balances Persistence
+    // ========================================================
+
+    public void saveDirtyBalance(UUID uuid, double amount) {
+        String sql = isPostgreSQL ?
+                "INSERT INTO dirty_balances (uuid, amount) VALUES (?, ?) ON CONFLICT (uuid) DO UPDATE SET amount = EXCLUDED.amount" :
+                (isMySQL ? "INSERT INTO dirty_balances (uuid, amount) VALUES (?, ?) ON DUPLICATE KEY UPDATE amount = VALUES(amount)" :
+                        "REPLACE INTO dirty_balances (uuid, amount) VALUES (?, ?)");
+        executeDatabaseOperation(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, uuid.toString());
+                ps.setDouble(2, amount);
+                ps.executeUpdate();
+            }
+        }, "Failed to save dirty balance");
+    }
+
+    public void deleteDirtyBalance(UUID uuid) {
+        String sql = "DELETE FROM dirty_balances WHERE uuid = ?";
+        executeDatabaseOperation(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, uuid.toString());
+                ps.executeUpdate();
+            }
+        }, "Failed to delete dirty balance");
+    }
+
+    public Map<UUID, Double> loadAllDirtyBalances() {
+        String query = "SELECT uuid, amount FROM dirty_balances";
+        return executeDatabaseQuery(conn -> {
+            Map<UUID, Double> result = new HashMap<>();
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(query)) {
+                while (rs.next()) {
+                    try {
+                        UUID uuid = UUID.fromString(rs.getString("uuid"));
+                        double amt = rs.getDouble("amount");
+                        result.put(uuid, amt);
+                    } catch (Exception ignored) {}
+                }
+            }
+            return result;
+        }, new HashMap<>(), "Failed to load all dirty balances");
+    }
+
+    public Map<String, Double> loadCryptoWalletForPlayer(UUID uuid) {
+        if (uuid == null) return new HashMap<>();
+        String sql = "SELECT crypto_name, balance FROM crypto_wallets WHERE uuid = ?";
+        return executeDatabaseQuery(conn -> {
+            Map<String, Double> result = new HashMap<>();
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, uuid.toString());
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        result.put(rs.getString("crypto_name"), rs.getDouble("balance"));
+                    }
+                }
+            }
+            return result;
+        }, new HashMap<>(), "Failed to load crypto wallet for player");
+    }
+
+    public Map<String, VaultCreditAPI.CreditAccount> loadCreditAccountsForPlayer(UUID uuid) {
+        if (uuid == null) return new HashMap<>();
+        String sql = "SELECT currency, overdraft_limit, current_used_credit, credit_score, is_frozen FROM local_credit_accounts WHERE uuid = ?";
+        return executeDatabaseQuery(conn -> {
+            Map<String, VaultCreditAPI.CreditAccount> result = new HashMap<>();
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, uuid.toString());
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        String curr = rs.getString("currency");
+                        double limit = rs.getDouble("overdraft_limit");
+                        double used = rs.getDouble("current_used_credit");
+                        int score = rs.getInt("credit_score");
+                        boolean frozen = rs.getInt("is_frozen") == 1;
+                        result.put(curr, new VaultCreditAPI.CreditAccount(uuid, curr, limit, used, score, frozen));
+                    }
+                }
+            }
+            return result;
+        }, new HashMap<>(), "Failed to load credit accounts for player");
+    }
+
+    public double loadDirtyBalanceForPlayer(UUID uuid) {
+        if (uuid == null) return 0.0;
+        String sql = "SELECT amount FROM dirty_balances WHERE uuid = ?";
+        return executeDatabaseQuery(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, uuid.toString());
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getDouble("amount");
+                    }
+                }
+            }
+            return 0.0;
+        }, 0.0, "Failed to load dirty balance for player");
     }
 }
 

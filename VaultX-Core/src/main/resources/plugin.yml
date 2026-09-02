@@ -1,13 +1,14 @@
-name: Vault
+name: VaultX
 version: ${project.version}
 description: ${project.description}
 authors: [SkyNex]
 
-main: ${mainClass}
+main: net.milkbowl.vault.Vault
 load: STARTUP
 api-version: "1.13"
 softdepend: [PlaceholderAPI, LuckPerms]
 folia-supported: true
+provides: [VaultX]
 
 commands:
   vault-info:
@@ -138,7 +139,7 @@ permissions:
     default: op
   vault.command.blackmarket:
     description: Allows accessing the Black Market and laundering dirty money
-    default: true
+    default: op
   vault.command.discord:
     description: Allows linking account to Discord
     default: true

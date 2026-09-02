@@ -322,6 +322,8 @@ crypto:
   mining-enabled: true
   # Network transaction fee percentage for crypto transfers (e.g. 0.1 = 0.1%)
   transfer-fee-percent: 0.1
+  # Mining difficulty factor (higher values increase difficulty)
+  difficulty: 1.0
 
 # Financial Milestones & Wealth Achievements
 milestones:

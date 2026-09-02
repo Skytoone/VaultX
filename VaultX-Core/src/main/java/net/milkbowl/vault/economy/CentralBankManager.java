@@ -4,6 +4,7 @@ import net.milkbowl.vault.Vault;
 import net.milkbowl.vault.redis.LocalFailoverManager;
 import net.milkbowl.vault.redis.VaultRedisManager;
 import org.bukkit.Bukkit;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
@@ -28,6 +29,7 @@ public class CentralBankManager {
     private double payTaxPercent = 2.0;
     private double exchangeTaxPercent = 1.0;
     private String treasuryAccount = "tresor_public";
+    private OfflinePlayer treasuryPlayer;
 
     private boolean wealthTaxEnabled = false;
     private double wealthTaxThreshold = 1000000.0;
@@ -49,6 +51,20 @@ public class CentralBankManager {
         }
     }
 
+    public void depositTreasury(String currency, double amount) {
+        if (amount <= 0) return;
+        RegisteredServiceProvider<Economy> rsp = Bukkit.getServicesManager().getRegistration(Economy.class);
+        if (rsp != null) {
+            Economy econ = rsp.getProvider();
+            OfflinePlayer treasury = (treasuryPlayer != null) ? treasuryPlayer : net.milkbowl.vault.util.UUIDCache.getOfflinePlayerFast(treasuryAccount);
+            if (currency == null || currency.equalsIgnoreCase("default")) {
+                econ.depositPlayer(treasury, amount);
+            } else if (econ instanceof MultiCurrencyEconomy) {
+                ((MultiCurrencyEconomy) econ).depositCurrencyPlayer(treasury, currency, amount);
+            }
+        }
+    }
+
     private void loadConfig() {
         ConfigurationSection sec = plugin.getConfig().getConfigurationSection("central-bank");
         if (sec != null) {
@@ -67,6 +83,7 @@ public class CentralBankManager {
             this.payTaxPercent = sec.getDouble("taxes.pay-tax-percent", 2.0);
             this.exchangeTaxPercent = sec.getDouble("taxes.exchange-tax-percent", 1.0);
             this.treasuryAccount = sec.getString("taxes.treasury-account", "tresor_public");
+            this.treasuryPlayer = net.milkbowl.vault.util.UUIDCache.getOfflinePlayerFast(this.treasuryAccount);
 
             this.wealthTaxEnabled = sec.getBoolean("wealth-tax.enabled", false);
             this.wealthTaxThreshold = sec.getDouble("wealth-tax.threshold", 1000000.0);
@@ -175,56 +192,50 @@ public class CentralBankManager {
                 Economy econ = rsp.getProvider();
 
                 double defaultRate = interestRates.getOrDefault("default", 0.0);
-                double totalDefaultWealthTaxDeducted = 0.0;
+                java.util.concurrent.atomic.DoubleAdder totalDefaultWealthTaxDeducted = new java.util.concurrent.atomic.DoubleAdder();
 
-                for (Player player : Bukkit.getOnlinePlayers()) {
-                    double balance = econ.getBalance(player);
-                    double interest = 0.0;
-                    double wealthTax = 0.0;
-
-                    // Calculate interest
-                    if (interestEnabled && defaultRate > 0) {
-                        interest = balance * (defaultRate / 100.0);
-                    }
-
-                    // Calculate wealth tax
-                    if (wealthTaxEnabled && wealthTaxPercent > 0 && balance > wealthTaxThreshold) {
-                        wealthTax = (balance - wealthTaxThreshold) * (wealthTaxPercent / 100.0);
-                    }
-
-                    double netChange = interest - wealthTax;
-                    if (netChange > 0) {
-                        econ.depositPlayer(player, netChange);
-                        // Notify player
-                        notifyPlayer(player, netChange, true);
-                    } else if (netChange < 0) {
-                        econ.withdrawPlayer(player, -netChange);
-                        // Notify player
-                        notifyPlayer(player, -netChange, false);
-                    }
-
-                    if (wealthTax > 0) {
-                        totalDefaultWealthTaxDeducted += wealthTax;
-                    }
+                Collection<? extends Player> onlinePlayers = Bukkit.getOnlinePlayers();
+                if (onlinePlayers.isEmpty()) {
+                    depositTreasuryTaxes(econ, 0.0, customWealthTaxesToTreasury);
+                    return;
                 }
 
-                // Deposit all taxes to Treasury
-                double totalTreasuryDeposit = totalDefaultWealthTaxDeducted;
+                java.util.concurrent.atomic.AtomicInteger remaining = new java.util.concurrent.atomic.AtomicInteger(onlinePlayers.size());
 
-                // Convert and add custom wealth taxes
-                for (Map.Entry<String, Double> entry : customWealthTaxesToTreasury.entrySet()) {
-                    double rate = exchangeRateManager.getRate(entry.getKey());
-                    double taxValInDefault = entry.getValue() * rate;
-                    totalTreasuryDeposit += taxValInDefault;
-                }
+                for (Player player : onlinePlayers) {
+                    net.milkbowl.vault.util.FoliaScheduler.runEntitySync(plugin, player, () -> {
+                        try {
+                            double balance = econ.getBalance(player);
+                            double interest = 0.0;
+                            double wealthTax = 0.0;
 
-                if (totalTreasuryDeposit > 0) {
-                    if (econ.hasBankSupport()) {
-                        if (!econ.getBanks().contains(treasuryAccount.toLowerCase())) {
-                            econ.createBank(treasuryAccount.toLowerCase(), (org.bukkit.OfflinePlayer) null);
+                            // Calculate interest
+                            if (interestEnabled && defaultRate > 0) {
+                                interest = balance * (defaultRate / 100.0);
+                            }
+
+                            // Calculate wealth tax
+                            if (wealthTaxEnabled && wealthTaxPercent > 0 && balance > wealthTaxThreshold) {
+                                wealthTax = (balance - wealthTaxThreshold) * (wealthTaxPercent / 100.0);
+                                totalDefaultWealthTaxDeducted.add(wealthTax);
+                            }
+
+                            double netChange = interest - wealthTax;
+                            if (netChange > 0) {
+                                econ.depositPlayer(player, netChange);
+                                // Notify player
+                                notifyPlayer(player, netChange, true);
+                            } else if (netChange < 0) {
+                                econ.withdrawPlayer(player, -netChange);
+                                // Notify player
+                                notifyPlayer(player, -netChange, false);
+                            }
+                        } finally {
+                            if (remaining.decrementAndGet() == 0) {
+                                depositTreasuryTaxes(econ, totalDefaultWealthTaxDeducted.sum(), customWealthTaxesToTreasury);
+                            }
                         }
-                        econ.bankDeposit(treasuryAccount.toLowerCase(), totalTreasuryDeposit);
-                    }
+                    });
                 }
             });
 
@@ -277,13 +288,30 @@ public class CentralBankManager {
         }
     }
 
+    private void depositTreasuryTaxes(Economy econ, double defaultTaxSum, Map<String, Double> customWealthTaxesToTreasury) {
+        double totalTreasuryDeposit = defaultTaxSum;
+        for (Map.Entry<String, Double> entry : customWealthTaxesToTreasury.entrySet()) {
+            double rate = exchangeRateManager.getRate(entry.getKey());
+            double taxValInDefault = entry.getValue() * rate;
+            totalTreasuryDeposit += taxValInDefault;
+        }
+
+        if (totalTreasuryDeposit > 0 && econ != null) {
+            if (econ.hasBankSupport()) {
+                if (!econ.getBanks().contains(treasuryAccount.toLowerCase())) {
+                    econ.createBank(treasuryAccount.toLowerCase(), (org.bukkit.OfflinePlayer) null);
+                }
+                econ.bankDeposit(treasuryAccount.toLowerCase(), totalTreasuryDeposit);
+            }
+        }
+    }
+
     private void notifyPlayer(Player player, double amount, boolean isGain) {
-        // Already running on the main thread, direct execution
         if (isGain) {
             player.sendMessage(Vault.getMessage("central-bank.interest-received", "&a&l[Central Bank] &aYou received &e+%amount%$ &aof interest on your account.")
                     .replace("%amount%", String.format("%.2f", amount)));
         } else {
-            player.sendMessage(Vault.getMessage("central-bank.tax-paid", "&c&l[Central Bank] &cYou paid &e-%amount%$ &aof wealth tax (Wealth Tax).")
+            player.sendMessage(Vault.getMessage("central-bank.tax-paid", "&c&l[Central Bank] &cYou paid &e-%amount%$ &cof wealth tax (Wealth Tax).")
                     .replace("%amount%", String.format("%.2f", amount)));
         }
     }

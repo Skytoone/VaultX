@@ -24,7 +24,7 @@ public class EscrowManager implements VaultEscrowAPI {
     private final Plugin plugin;
     private final LocalFailoverManager failoverManager;
     private org.bukkit.scheduler.BukkitTask autoRefundTask;
-    private static final java.util.Set<String> PROCESSING_ESCROWS = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final java.util.Set<String> processingEscrows = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public EscrowManager(Plugin plugin) {
         this.plugin = plugin;
@@ -37,7 +37,7 @@ public class EscrowManager implements VaultEscrowAPI {
             autoRefundTask.cancel();
             autoRefundTask = null;
         }
-        PROCESSING_ESCROWS.clear();
+        processingEscrows.clear();
     }
 
     private VaultRedisManager getRedisManager() {
@@ -45,6 +45,9 @@ public class EscrowManager implements VaultEscrowAPI {
     }
 
     private Economy getEconomy() {
+        if (!Vault.getWrappedEconomies().isEmpty()) {
+            return Vault.getWrappedEconomies().get(0);
+        }
         org.bukkit.plugin.RegisteredServiceProvider<Economy> rsp = Bukkit.getServicesManager().getRegistration(Economy.class);
         return rsp != null ? rsp.getProvider() : null;
     }
@@ -107,6 +110,10 @@ public class EscrowManager implements VaultEscrowAPI {
             future.complete(new EscrowResult(false, Vault.getMessage("escrow.disabled", "§cEscrow is disabled on this server."), null));
             return future;
         }
+        if (sender == null || receiver == null || Double.isNaN(amount) || Double.isInfinite(amount) || amount <= 0) {
+            future.complete(new EscrowResult(false, Vault.getMessage("escrow.invalid-parameters", "§cInvalid escrow parameters."), null));
+            return future;
+        }
 
         VaultEscrowCreateEvent createEvent = new VaultEscrowCreateEvent(sender, receiver, amount, currency, timeoutSec);
         Bukkit.getPluginManager().callEvent(createEvent);
@@ -117,21 +124,22 @@ public class EscrowManager implements VaultEscrowAPI {
         final double finalAmountParam = createEvent.getAmount();
         final long finalTimeoutParam = createEvent.getTimeoutSec();
 
-        int maxActive = plugin.getConfig().getInt("escrow.max-active-per-player", 5);
-        if (maxActive > 0) {
-            List<EscrowDetails> currentEscrows = listEscrows(sender).join();
-            long activeCount = currentEscrows.stream().filter(e -> e != null && e.status.equalsIgnoreCase("PENDING")).count();
-            if (activeCount >= maxActive) {
-                future.complete(new EscrowResult(false, Vault.getMessage("escrow.limit-exceeded", "§cYou cannot have more than %limit% active escrow transactions.").replace("%limit%", String.valueOf(maxActive)), null));
-                return future;
-            }
-        }
-
-        long actualTimeoutSec = timeoutSec > 0 ? timeoutSec : plugin.getConfig().getLong("escrow.default-timeout-seconds", 300L);
+        final String safeCurrency = (currency == null || currency.trim().isEmpty()) ? "default" : currency.trim();
+        long actualTimeoutSec = finalTimeoutParam > 0 ? finalTimeoutParam : plugin.getConfig().getLong("escrow.default-timeout-seconds", 300L);
 
         net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+            int maxActive = plugin.getConfig().getInt("escrow.max-active-per-player", 5);
+            if (maxActive > 0) {
+                List<EscrowDetails> currentEscrows = listEscrows(sender).join();
+                long activeCount = currentEscrows.stream().filter(e -> e != null && e.status.equalsIgnoreCase("PENDING")).count();
+                if (activeCount >= maxActive) {
+                    future.complete(new EscrowResult(false, Vault.getMessage("escrow.limit-exceeded", "§cYou cannot have more than %limit% active escrow transactions.").replace("%limit%", String.valueOf(maxActive)), null));
+                    return;
+                }
+            }
+
             VaultRedisManager redis = getRedisManager();
-            String lockKey = sender.getUniqueId().toString() + ":" + currency.toLowerCase();
+            String lockKey = sender.getUniqueId().toString() + ":" + safeCurrency.toLowerCase();
             String lockVal = UUID.randomUUID().toString();
             boolean locked = false;
             if (redis != null && redis.isOnline()) {
@@ -151,21 +159,21 @@ public class EscrowManager implements VaultEscrowAPI {
                         return;
                     }
                     double bal = 0;
-                    if (currency.equalsIgnoreCase("default")) {
+                    if (safeCurrency.equalsIgnoreCase("default")) {
                         bal = econ.getBalance(sender);
                     } else if (econ instanceof MultiCurrencyEconomy) {
-                        bal = ((MultiCurrencyEconomy) econ).getCurrencyBalance(sender, currency);
+                        bal = ((MultiCurrencyEconomy) econ).getCurrencyBalance(sender, safeCurrency);
                     }
-                    if (bal < amount) {
+                    if (bal < finalAmountParam) {
                         withdrawFuture.complete(false);
                         return;
                     }
 
                     EconomyResponse response;
-                    if (currency.equalsIgnoreCase("default")) {
-                        response = econ.withdrawPlayer(sender, amount);
+                    if (safeCurrency.equalsIgnoreCase("default")) {
+                        response = econ.withdrawPlayer(sender, finalAmountParam);
                     } else if (econ instanceof MultiCurrencyEconomy) {
-                        response = ((MultiCurrencyEconomy) econ).withdrawCurrencyPlayer(sender, currency, amount);
+                        response = ((MultiCurrencyEconomy) econ).withdrawCurrencyPlayer(sender, safeCurrency, finalAmountParam);
                     } else {
                         response = new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Multi-currency not supported");
                     }
@@ -180,7 +188,7 @@ public class EscrowManager implements VaultEscrowAPI {
                 String escrowId = UUID.randomUUID().toString().substring(0, 8); // Shorter ID for commands
                 long timeoutAt = System.currentTimeMillis() + (actualTimeoutSec * 1000L);
                 
-                failoverManager.saveLocalEscrow(escrowId, sender.getUniqueId(), receiver.getUniqueId(), amount, currency, "PENDING", timeoutAt);
+                failoverManager.saveLocalEscrow(escrowId, sender.getUniqueId(), receiver.getUniqueId(), finalAmountParam, safeCurrency, "PENDING", timeoutAt);
 
                 if (redis != null && redis.isOnline()) {
                     try (Jedis jedis = redis.getPool().getResource()) {
@@ -188,8 +196,8 @@ public class EscrowManager implements VaultEscrowAPI {
                         Map<String, String> data = new HashMap<>();
                         data.put("sender", sender.getUniqueId().toString());
                         data.put("receiver", receiver.getUniqueId().toString());
-                        data.put("amount", String.valueOf(amount));
-                        data.put("currency", currency.toLowerCase());
+                        data.put("amount", String.valueOf(finalAmountParam));
+                        data.put("currency", safeCurrency.toLowerCase());
                         data.put("status", "PENDING");
                         data.put("timeout_at", String.valueOf(timeoutAt));
                         jedis.hset(key, data);
@@ -216,7 +224,7 @@ public class EscrowManager implements VaultEscrowAPI {
     public java.util.concurrent.CompletableFuture<VaultEscrowAPI.EscrowResult> releaseEscrow(String escrowId, org.bukkit.command.CommandSender confirmer) {
         java.util.concurrent.CompletableFuture<VaultEscrowAPI.EscrowResult> future = new java.util.concurrent.CompletableFuture<>();
         net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
-            if (!PROCESSING_ESCROWS.add(escrowId)) {
+            if (!processingEscrows.add(escrowId)) {
                 future.complete(new EscrowResult(false, "Cette transaction est déjà en cours de traitement.", null));
                 return;
             }
@@ -227,7 +235,7 @@ public class EscrowManager implements VaultEscrowAPI {
             if (redis != null && redis.isOnline()) {
                 locked = redis.acquireLock(lockKey, lockVal, 5000);
                 if (!locked) {
-                    PROCESSING_ESCROWS.remove(escrowId);
+                    processingEscrows.remove(escrowId);
                     future.complete(new EscrowResult(false, Vault.getMessage("escrow.lock-active", "&cAccount lock active. Please try again."), null));
                     return;
                 }
@@ -270,13 +278,21 @@ public class EscrowManager implements VaultEscrowAPI {
                         return;
                     }
                     OfflinePlayer receiver = Bukkit.getOfflinePlayer(escrow.receiver);
+                    double feePercent = plugin.getConfig().getDouble("escrow.service-fee-percent", 0.5);
+                    double fee = (feePercent > 0) ? (escrow.amount * (feePercent / 100.0)) : 0.0;
+                    double payout = Math.max(0.0, escrow.amount - fee);
+
                     EconomyResponse response;
                     if (escrow.currency.equalsIgnoreCase("default")) {
-                        response = econ.depositPlayer(receiver, escrow.amount);
+                        response = econ.depositPlayer(receiver, payout);
                     } else if (econ instanceof MultiCurrencyEconomy) {
-                        response = ((MultiCurrencyEconomy) econ).depositCurrencyPlayer(receiver, escrow.currency, escrow.amount);
+                        response = ((MultiCurrencyEconomy) econ).depositCurrencyPlayer(receiver, escrow.currency, payout);
                     } else {
                         response = new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Multi-currency not supported");
+                    }
+
+                    if (response.transactionSuccess() && fee > 0 && Vault.getCentralBankManager() != null) {
+                        Vault.getCentralBankManager().depositTreasury(escrow.currency, fee);
                     }
                     depositFuture.complete(response.transactionSuccess());
                 });
@@ -296,7 +312,7 @@ public class EscrowManager implements VaultEscrowAPI {
             } catch (Exception e) {
                 future.complete(new EscrowResult(false, Vault.getMessage("general.unknown-error", "&cAn error occurred: %error%").replace("%error%", e.getMessage()), null));
             } finally {
-                PROCESSING_ESCROWS.remove(escrowId);
+                processingEscrows.remove(escrowId);
                 if (redis != null && locked) {
                     redis.releaseLock(lockKey, lockVal);
                 }
@@ -308,7 +324,7 @@ public class EscrowManager implements VaultEscrowAPI {
     public java.util.concurrent.CompletableFuture<VaultEscrowAPI.EscrowResult> refundEscrow(String escrowId, org.bukkit.command.CommandSender requestor) {
         java.util.concurrent.CompletableFuture<VaultEscrowAPI.EscrowResult> future = new java.util.concurrent.CompletableFuture<>();
         net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
-            if (!PROCESSING_ESCROWS.add(escrowId)) {
+            if (!processingEscrows.add(escrowId)) {
                 future.complete(new EscrowResult(false, "Cette transaction est déjà en cours de traitement.", null));
                 return;
             }
@@ -319,7 +335,7 @@ public class EscrowManager implements VaultEscrowAPI {
             if (redis != null && redis.isOnline()) {
                 locked = redis.acquireLock(lockKey, lockVal, 5000);
                 if (!locked) {
-                    PROCESSING_ESCROWS.remove(escrowId);
+                    processingEscrows.remove(escrowId);
                     future.complete(new EscrowResult(false, Vault.getMessage("escrow.lock-active", "&cAccount lock active. Please try again."), null));
                     return;
                 }
@@ -402,7 +418,7 @@ public class EscrowManager implements VaultEscrowAPI {
             } catch (Exception e) {
                 future.complete(new EscrowResult(false, Vault.getMessage("general.unknown-error", "&cAn error occurred: %error%").replace("%error%", e.getMessage()), null));
             } finally {
-                PROCESSING_ESCROWS.remove(escrowId);
+                processingEscrows.remove(escrowId);
                 if (redis != null && locked) {
                     redis.releaseLock(lockKey, lockVal);
                 }

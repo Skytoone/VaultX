@@ -181,7 +181,12 @@ public class SubscriptionManager {
                 return;
             }
         } else {
-            UUID targetUuid = UUID.fromString(sub.target);
+            UUID targetUuid = parseUuid(sub.target);
+            if (targetUuid == null) {
+                refundSubscriber(econ, subscriber, sub.amount, currency);
+                suspendSubscription(sub, "Invalid target UUID (" + sub.target + ")");
+                return;
+            }
             OfflinePlayer targetPlayer = Bukkit.getOfflinePlayer(targetUuid);
             targetName = targetPlayer.getName() != null ? targetPlayer.getName() : "Unknown";
 
@@ -211,15 +216,20 @@ public class SubscriptionManager {
         }
 
         if (depositSuccess) {
-            Bukkit.getPluginManager().callEvent(new VaultSubscriptionRenewEvent(subscriber, String.valueOf(sub.id), currency, sub.amount, true));
+            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                Bukkit.getPluginManager().callEvent(new VaultSubscriptionRenewEvent(subscriber, String.valueOf(sub.id), currency, sub.amount, true));
+            });
             final String finalTargetName = targetName;
             final double finalAmount = sub.amount;
             final String finalCurrency = currency;
             net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
                 failoverManager.savePlayerTransaction(sub.subscriber, "WITHDRAW_SUB_BILL", finalCurrency, finalAmount, finalTargetName);
                 if (sub.targetType.equalsIgnoreCase("PLAYER")) {
-                    failoverManager.savePlayerTransaction(UUID.fromString(sub.target), "DEPOSIT_SUB_BILL", finalCurrency, finalAmount,
-                            subscriber.getName() != null ? subscriber.getName() : "Unknown");
+                    UUID targetUuid = parseUuid(sub.target);
+                    if (targetUuid != null) {
+                        failoverManager.savePlayerTransaction(targetUuid, "DEPOSIT_SUB_BILL", finalCurrency, finalAmount,
+                                subscriber.getName() != null ? subscriber.getName() : "Unknown");
+                    }
                 }
             });
 
@@ -229,14 +239,25 @@ public class SubscriptionManager {
             });
 
             if (subscriber.isOnline() && subscriber.getPlayer() != null) {
-                subscriber.getPlayer().sendMessage(Vault.getMessage("subscriptions.billing-success",
-                        "§a§l[Subscription] §aAutomatic billing of §e%amount% §afor your subscription to §f%target%§a.")
-                        .replace("%amount%", formatAmount(econ, sub.amount, currency))
-                        .replace("%target%", targetName));
+                net.milkbowl.vault.util.FoliaScheduler.runEntitySync(plugin, subscriber.getPlayer(), () -> {
+                    subscriber.getPlayer().sendMessage(Vault.getMessage("subscriptions.billing-success",
+                            "§a§l[Subscription] §aAutomatic billing of §e%amount% §afor your subscription to §f%target%§a.")
+                            .replace("%amount%", formatAmount(econ, sub.amount, currency))
+                            .replace("%target%", finalTargetName));
+                });
             }
         } else {
             refundSubscriber(econ, subscriber, sub.amount, currency);
             suspendSubscription(sub, "Failed to deposit to recipient.");
+        }
+    }
+
+    private UUID parseUuid(String str) {
+        if (str == null) return null;
+        try {
+            return UUID.fromString(str);
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 
@@ -256,8 +277,11 @@ public class SubscriptionManager {
         OfflinePlayer subscriber = Bukkit.getOfflinePlayer(sub.subscriber);
         String targetName = sub.target;
         if (sub.targetType.equalsIgnoreCase("PLAYER")) {
-            OfflinePlayer targetPlayer = Bukkit.getOfflinePlayer(UUID.fromString(sub.target));
-            targetName = targetPlayer.getName() != null ? targetPlayer.getName() : "Unknown";
+            UUID targetUuid = parseUuid(sub.target);
+            if (targetUuid != null) {
+                OfflinePlayer targetPlayer = Bukkit.getOfflinePlayer(targetUuid);
+                targetName = targetPlayer.getName() != null ? targetPlayer.getName() : "Unknown";
+            }
         }
 
         String alertMsg = "Subscription to " + targetName + " suspended. Reason: " + reason;

@@ -16,6 +16,7 @@ import org.bukkit.plugin.RegisteredServiceProvider;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import net.milkbowl.vault.Vault;
@@ -29,7 +30,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
     private final java.util.Map<String, String> displayNameCache = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static double parsePositiveDouble(String input) throws NumberFormatException {
-        if (input == null) throw new NumberFormatException("Null input");
+        if (input == null)
+            throw new NumberFormatException("Null input");
         double val = Double.parseDouble(input);
         if (Double.isNaN(val) || Double.isInfinite(val) || val <= 0) {
             throw new NumberFormatException("Invalid positive number: " + input);
@@ -38,7 +40,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
     }
 
     public static double parseNonNegativeDouble(String input) throws NumberFormatException {
-        if (input == null) throw new NumberFormatException("Null input");
+        if (input == null)
+            throw new NumberFormatException("Null input");
         double val = Double.parseDouble(input);
         if (Double.isNaN(val) || Double.isInfinite(val) || val < 0) {
             throw new NumberFormatException("Invalid non-negative number: " + input);
@@ -60,10 +63,54 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         return vxArgs;
     }
 
-    private String getMsg(String path, String def) {
-        String msg = net.milkbowl.vault.Vault.getMessage(path, def);
-        String label = currentLabel.get();
+    private void runAsync(Runnable runnable) {
+        String lbl = currentLabel.get();
         String orig = currentOriginalName.get();
+        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+            String prevLbl = currentLabel.get();
+            String prevOrig = currentOriginalName.get();
+            currentLabel.set(lbl);
+            currentOriginalName.set(orig);
+            try {
+                runnable.run();
+            } finally {
+                if (prevLbl != null)
+                    currentLabel.set(prevLbl);
+                else
+                    currentLabel.remove();
+                if (prevOrig != null)
+                    currentOriginalName.set(prevOrig);
+                else
+                    currentOriginalName.remove();
+            }
+        });
+    }
+
+    private void runSync(Runnable runnable) {
+        String lbl = currentLabel.get();
+        String orig = currentOriginalName.get();
+        net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+            String prevLbl = currentLabel.get();
+            String prevOrig = currentOriginalName.get();
+            currentLabel.set(lbl);
+            currentOriginalName.set(orig);
+            try {
+                runnable.run();
+            } finally {
+                if (prevLbl != null)
+                    currentLabel.set(prevLbl);
+                else
+                    currentLabel.remove();
+                if (prevOrig != null)
+                    currentOriginalName.set(prevOrig);
+                else
+                    currentOriginalName.remove();
+            }
+        });
+    }
+
+    private String getMsg(String path, String def, String label, String orig) {
+        String msg = net.milkbowl.vault.Vault.getMessage(path, def);
         if (label != null && orig != null) {
             label = label.toLowerCase();
             orig = orig.toLowerCase();
@@ -76,11 +123,11 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             }
 
             msg = msg.replace("/vaultx " + mappingName, "/" + label)
-                     .replace("/vx " + mappingName, "/" + label);
+                    .replace("/vx " + mappingName, "/" + label);
 
             if (orig.equals("money")) {
                 msg = msg.replace("/vaultx balance", "/" + label).replace("/vx balance", "/" + label)
-                         .replace("/vaultx bal", "/" + label).replace("/vx bal", "/" + label);
+                        .replace("/vaultx bal", "/" + label).replace("/vx bal", "/" + label);
             } else if (orig.equals("baltop")) {
                 msg = msg.replace("/vaultx rich", "/" + label).replace("/vx rich", "/" + label);
             } else if (orig.equals("exchange")) {
@@ -88,6 +135,10 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             }
         }
         return msg;
+    }
+
+    private String getMsg(String path, String def) {
+        return getMsg(path, def, currentLabel.get(), currentOriginalName.get());
     }
 
     private Economy getEconomy() {
@@ -109,7 +160,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
     }
 
     private String getPlayerNameSafe(OfflinePlayer player, String fallback) {
-        if (player == null) return fallback;
+        if (player == null)
+            return fallback;
         String name = player.getName();
         return name != null ? name : fallback;
     }
@@ -124,7 +176,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         }
         return displayNameCache.computeIfAbsent(normalizedKey, key -> {
             // 1. Try to get chat symbol from config.yml (supporting color codes)
-            org.bukkit.configuration.ConfigurationSection symbols = plugin.getConfig().getConfigurationSection("currency-exchange.symbols");
+            org.bukkit.configuration.ConfigurationSection symbols = plugin.getConfig()
+                    .getConfigurationSection("currency-exchange.symbols");
             if (symbols != null) {
                 String sym = symbols.getString(key);
                 if (sym != null) {
@@ -137,18 +190,21 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                     }
                 }
             }
-            
+
             // 2. Try to get display name from gui.yml (stripping colors)
             org.bukkit.configuration.file.YamlConfiguration guiCfg = net.milkbowl.vault.Vault.getGuiConfig();
             if (guiCfg != null) {
                 String name = guiCfg.getString("currencies." + key + ".name");
                 if (name != null) {
-                    return org.bukkit.ChatColor.stripColor(org.bukkit.ChatColor.translateAlternateColorCodes('&', name));
+                    return org.bukkit.ChatColor
+                            .stripColor(org.bukkit.ChatColor.translateAlternateColorCodes('&', name));
                 }
             }
-            
-            // 3. Fallback: use currency name from config.yml (preserving its original casing)
-            org.bukkit.configuration.ConfigurationSection section = plugin.getConfig().getConfigurationSection("currency-exchange.rates");
+
+            // 3. Fallback: use currency name from config.yml (preserving its original
+            // casing)
+            org.bukkit.configuration.ConfigurationSection section = plugin.getConfig()
+                    .getConfigurationSection("currency-exchange.rates");
             if (section != null) {
                 for (String rateKey : section.getKeys(false)) {
                     if (rateKey.equalsIgnoreCase(key)) {
@@ -156,7 +212,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                     }
                 }
             }
-            
+
             // 4. Last resort fallback
             if (key.length() > 0) {
                 return key.substring(0, 1).toUpperCase() + key.substring(1).toLowerCase();
@@ -178,7 +234,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             }
         }
         if (perm != null && !perm.isEmpty() && !sender.hasPermission(perm)) {
-            sender.sendMessage(getMsg("general.no-permission", "§cYou do not have permission to execute this command!"));
+            sender.sendMessage(
+                    getMsg("general.no-permission", "§cYou do not have permission to execute this command!"));
             return false;
         }
         return true;
@@ -193,52 +250,65 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        String cmdName = command instanceof VaultXDynamicCommand ? ((VaultXDynamicCommand) command).getOriginalName().toLowerCase() : command.getName().toLowerCase();
+        String cmdName = command instanceof VaultXDynamicCommand
+                ? ((VaultXDynamicCommand) command).getOriginalName().toLowerCase()
+                : command.getName().toLowerCase();
         currentOriginalName.set(cmdName);
         currentLabel.set(label.toLowerCase());
 
         if (cmdName.equals("money") || cmdName.equals("balance") || cmdName.equals("bal")) {
-            if (!checkPermission(sender, "money", "vault.command.money")) return true;
+            if (!checkPermission(sender, "money", "vault.command.money"))
+                return true;
             handleBalance(sender, econ, toVxArgs("balance", args));
             return true;
         } else if (cmdName.equals("pay")) {
-            if (!checkPermission(sender, "pay", "vault.command.pay")) return true;
+            if (!checkPermission(sender, "pay", "vault.command.pay"))
+                return true;
             handlePay(sender, econ, toVxArgs("pay", args));
             return true;
         } else if (cmdName.equals("baltop") || cmdName.equals("moneytop")) {
-            if (!checkPermission(sender, "baltop", "vault.top")) return true;
+            if (!checkPermission(sender, "baltop", "vault.top"))
+                return true;
             handleTop(sender, econ, toVxArgs("top", args));
             return true;
         } else if (cmdName.equals("bank") || cmdName.equals("sharedbank")) {
-            if (!checkPermission(sender, "bank", "vault.command.bank")) return true;
+            if (!checkPermission(sender, "bank", "vault.command.bank"))
+                return true;
             handleBank(sender, econ, toVxArgs("bank", args));
             return true;
         } else if (cmdName.equals("loan") || cmdName.equals("loans")) {
-            if (!checkPermission(sender, "loan", "vault.command.loan")) return true;
+            if (!checkPermission(sender, "loan", "vault.command.loan"))
+                return true;
             handleLoan(sender, econ, toVxArgs("loan", args));
             return true;
         } else if (cmdName.equals("mailbox") || cmdName.equals("mail")) {
-            if (!checkPermission(sender, "mailbox", "vault.command.mailbox")) return true;
+            if (!checkPermission(sender, "mailbox", "vault.command.mailbox"))
+                return true;
             handleMailbox(sender, toVxArgs("mailbox", args));
             return true;
         } else if (cmdName.equals("escrow")) {
-            if (!checkPermission(sender, "escrow", "vault.command.escrow")) return true;
+            if (!checkPermission(sender, "escrow", "vault.command.escrow"))
+                return true;
             handleEscrow(sender, toVxArgs("escrow", args));
             return true;
         } else if (cmdName.equals("stocks") || cmdName.equals("stockmarket")) {
-            if (!checkPermission(sender, "stocks", "vault.command.stocks")) return true;
+            if (!checkPermission(sender, "stocks", "vault.command.stocks"))
+                return true;
             handleStocks(sender, econ, toVxArgs("stocks", args));
             return true;
         } else if (cmdName.equals("exchange") || cmdName.equals("forex") || cmdName.equals("convert")) {
-            if (!checkPermission(sender, "exchange", "vault.convert")) return true;
+            if (!checkPermission(sender, "exchange", "vault.convert"))
+                return true;
             handleExchange(sender, toVxArgs("exchange", args));
             return true;
         } else if (cmdName.equals("eco") || cmdName.equals("economy")) {
-            if (!checkPermission(sender, "eco", "vault.admin")) return true;
+            if (!checkPermission(sender, "eco", "vault.admin"))
+                return true;
             handleAdmin(sender, econ, toVxArgs("admin", args));
             return true;
         } else if (cmdName.equals("check") || cmdName.equals("cheque")) {
-            if (!checkPermission(sender, "check", "vault.command.check")) return true;
+            if (!checkPermission(sender, "check", "vault.command.check"))
+                return true;
             // Auto-shortcut: if first argument is a number, insert "write" before it
             if (args.length > 0 && !args[0].equalsIgnoreCase("write")) {
                 try {
@@ -247,38 +317,46 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                     newArgs[0] = "write";
                     System.arraycopy(args, 0, newArgs, 1, args.length);
                     args = newArgs;
-                } catch (NumberFormatException ignored) {}
+                } catch (NumberFormatException ignored) {
+                }
             }
             handleCheck(sender, econ, toVxArgs("check", args));
             return true;
         } else if (cmdName.equals("payday") || cmdName.equals("salary")) {
-            if (!checkPermission(sender, "payday", "vault.command.payday")) return true;
+            if (!checkPermission(sender, "payday", "vault.command.payday"))
+                return true;
             handlePayday(sender, args);
             return true;
         } else if (cmdName.equals("transactions") || cmdName.equals("tx") || cmdName.equals("history")) {
-            if (!checkPermission(sender, "transactions", "vault.command.transactions")) return true;
+            if (!checkPermission(sender, "transactions", "vault.command.transactions"))
+                return true;
             handleTransactions(sender, toVxArgs("transactions", args));
             return true;
         } else if (cmdName.equals("subscribe") || cmdName.equals("subscriptions")) {
-            if (!checkPermission(sender, "subscribe", "vault.command.subscribe")) return true;
+            if (!checkPermission(sender, "subscribe", "vault.command.subscribe"))
+                return true;
             handleSubscribe(sender, econ, toVxArgs("subscribe", args));
             return true;
         } else if (cmdName.equals("blackmarket") || cmdName.equals("launder") || cmdName.equals("marchenoir")) {
-            if (!checkPermission(sender, "blackmarket", "vault.command.blackmarket")) return true;
+            if (!checkPermission(sender, "blackmarket", "vault.command.blackmarket"))
+                return true;
             handleBlackMarket(sender, toVxArgs("blackmarket", args));
             return true;
         } else if (cmdName.equals("dirty")) {
-            if (!checkPermission(sender, "blackmarket", "vault.command.blackmarket")) return true;
+            if (!checkPermission(sender, "blackmarket", "vault.command.blackmarket"))
+                return true;
             handleDirty(sender, toVxArgs("dirty", args));
             return true;
         } else if (cmdName.equals("discord") || cmdName.equals("linkdiscord")) {
-            if (!checkPermission(sender, "discord", "vault.command.discord")) return true;
+            if (!checkPermission(sender, "discord", "vault.command.discord"))
+                return true;
             handleDiscord(sender, toVxArgs("discord", args));
             return true;
         }
 
         if (args.length == 0) {
-            if (!checkPermission(sender, "vaultx", "vault.use")) return true;
+            if (!checkPermission(sender, "vaultx", "vault.use"))
+                return true;
             sendHelp(sender, label);
             return true;
         }
@@ -287,46 +365,55 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         switch (sub) {
             case "balance":
             case "bal":
-                if (!checkPermission(sender, "money", "vault.command.money")) break;
+                if (!checkPermission(sender, "money", "vault.command.money"))
+                    break;
                 handleBalance(sender, econ, args);
                 break;
             case "pay":
-                if (!checkPermission(sender, "pay", "vault.command.pay")) break;
+                if (!checkPermission(sender, "pay", "vault.command.pay"))
+                    break;
                 handlePay(sender, econ, args);
                 break;
             case "top":
             case "rich":
-                if (!checkPermission(sender, "baltop", "vault.top")) break;
+                if (!checkPermission(sender, "baltop", "vault.top"))
+                    break;
                 handleTop(sender, econ, args);
                 break;
             case "transactions":
             case "tx":
-                if (!checkPermission(sender, "transactions", "vault.command.transactions")) break;
+                if (!checkPermission(sender, "transactions", "vault.command.transactions"))
+                    break;
                 handleTransactions(sender, args);
                 break;
             case "subscribe":
             case "subscription":
             case "subscriptions":
-                if (!checkPermission(sender, "subscribe", "vault.command.subscribe")) break;
+                if (!checkPermission(sender, "subscribe", "vault.command.subscribe"))
+                    break;
                 handleSubscribe(sender, econ, args);
                 break;
             case "blackmarket":
             case "launder":
             case "marchenoir":
-                if (!checkPermission(sender, "blackmarket", "vault.command.blackmarket")) break;
+                if (!checkPermission(sender, "blackmarket", "vault.command.blackmarket"))
+                    break;
                 handleBlackMarket(sender, args);
                 break;
             case "dirty":
-                if (!checkPermission(sender, "blackmarket", "vault.command.blackmarket")) break;
+                if (!checkPermission(sender, "blackmarket", "vault.command.blackmarket"))
+                    break;
                 handleDirty(sender, args);
                 break;
             case "discord":
-                if (!checkPermission(sender, "discord", "vault.command.discord")) break;
+                if (!checkPermission(sender, "discord", "vault.command.discord"))
+                    break;
                 handleDiscord(sender, args);
                 break;
             case "history":
             case "ledger":
-                if (!checkPermission(sender, "transactions", "vault.command.transactions")) break;
+                if (!checkPermission(sender, "transactions", "vault.command.transactions"))
+                    break;
                 if (sender instanceof Player) {
                     net.milkbowl.vault.Vault.getVaultXGUI().openHistory((Player) sender);
                 } else {
@@ -335,27 +422,32 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 }
                 break;
             case "admin":
-                if (!checkPermission(sender, "eco", "vault.admin")) break;
+                if (!checkPermission(sender, "eco", "vault.admin"))
+                    break;
                 handleAdmin(sender, econ, args);
                 break;
             case "escrow":
-                if (!checkPermission(sender, "escrow", "vault.command.escrow")) break;
+                if (!checkPermission(sender, "escrow", "vault.command.escrow"))
+                    break;
                 handleEscrow(sender, args);
                 break;
             case "menu":
             case "gui":
-                if (!checkPermission(sender, "vaultx", "vault.use")) break;
+                if (!checkPermission(sender, "vaultx", "vault.use"))
+                    break;
                 handleMenu(sender);
                 break;
             case "exchange":
             case "forex":
             case "convert":
-                if (!checkPermission(sender, "exchange", "vault.convert")) break;
+                if (!checkPermission(sender, "exchange", "vault.convert"))
+                    break;
                 handleExchange(sender, args);
                 break;
             case "mailbox":
             case "mail":
-                if (!checkPermission(sender, "mailbox", "vault.command.mailbox")) break;
+                if (!checkPermission(sender, "mailbox", "vault.command.mailbox"))
+                    break;
                 handleMailbox(sender, args);
                 break;
             case "analytics":
@@ -372,24 +464,29 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 handlePayOffline(sender, args);
                 break;
             case "bank":
-                if (!checkPermission(sender, "bank", "vault.command.bank")) break;
+                if (!checkPermission(sender, "bank", "vault.command.bank"))
+                    break;
                 handleBank(sender, econ, args);
                 break;
             case "check":
-                if (!checkPermission(sender, "check", "vault.command.check")) break;
+                if (!checkPermission(sender, "check", "vault.command.check"))
+                    break;
                 handleCheck(sender, econ, args);
                 break;
             case "loan":
-                if (!checkPermission(sender, "loan", "vault.command.loan")) break;
+                if (!checkPermission(sender, "loan", "vault.command.loan"))
+                    break;
                 handleLoan(sender, econ, args);
                 break;
             case "stocks":
-                if (!checkPermission(sender, "stocks", "vault.command.stocks")) break;
+                if (!checkPermission(sender, "stocks", "vault.command.stocks"))
+                    break;
                 handleStocks(sender, econ, args);
                 break;
             case "stats":
             case "metrics":
-                if (!checkPermission(sender, "stats", "vault.admin")) break;
+                if (!checkPermission(sender, "stats", "vault.admin"))
+                    break;
                 if (sender instanceof Player && (args.length < 2 || !args[1].equalsIgnoreCase("text"))) {
                     if (net.milkbowl.vault.Vault.getVaultXGUI() != null) {
                         net.milkbowl.vault.Vault.getVaultXGUI().openAdminStats((Player) sender);
@@ -401,17 +498,34 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 }
                 break;
             case "logs":
-                if (!checkPermission(sender, "logs", "vault.admin")) break;
+                if (!checkPermission(sender, "logs", "vault.admin"))
+                    break;
                 handleLogs(sender, econ, args);
                 break;
             case "dynamicpricing":
             case "dp":
             case "dynamic":
-                if (!checkPermission(sender, "dynamicpricing", "vault.admin")) break;
+                if (!checkPermission(sender, "dynamicpricing", "vault.admin"))
+                    break;
                 handleDynamicPricing(sender, econ, args);
                 break;
+            case "crypto":
+                handleCrypto(sender, args);
+                break;
+            case "credit":
+                handleCredit(sender, args);
+                break;
+            case "staking":
+            case "stake":
+                handleStaking(sender, econ, args);
+                break;
+            case "auction":
+            case "ah":
+                handleAuction(sender, econ, args);
+                break;
             default:
-                if (!checkPermission(sender, "vaultx", "vault.use")) break;
+                if (!checkPermission(sender, "vaultx", "vault.use"))
+                    break;
                 sendHelp(sender, label);
                 break;
         }
@@ -438,7 +552,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         try {
             amount = parsePositiveDouble(args[2]);
         } catch (NumberFormatException e) {
-            player.sendMessage(getMsg("commands.check.invalid-amount", "§cInvalid amount. It must be a positive number."));
+            player.sendMessage(
+                    getMsg("commands.check.invalid-amount", "§cInvalid amount. It must be a positive number."));
             return;
         }
 
@@ -472,7 +587,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         }
 
         if (balance < totalRequired) {
-            player.sendMessage(getMsg("commands.check.insufficient-funds", "§cYou do not have enough funds to sign this check (including creation fees)."));
+            player.sendMessage(getMsg("commands.check.insufficient-funds",
+                    "§cYou do not have enough funds to sign this check (including creation fees)."));
             return;
         }
 
@@ -502,7 +618,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         if (meta != null) {
             meta.setDisplayName("§6§lEconomic Check");
             List<String> lore = new ArrayList<>();
-            String displayVal = currency.equalsIgnoreCase("default") 
+            String displayVal = currency.equalsIgnoreCase("default")
                     ? (econ != null ? econ.format(amount) : String.valueOf(amount))
                     : String.format("%.2f %s", amount, getCurrencyDisplayName(currency));
             lore.add("§7Value: §e" + displayVal);
@@ -520,7 +636,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 player.getWorld().dropItemNaturally(player.getLocation(), leftoverItem);
             }
         }
-        String formatted = currency.equalsIgnoreCase("default") 
+        String formatted = currency.equalsIgnoreCase("default")
                 ? (econ != null ? econ.format(amount) : String.valueOf(amount))
                 : String.format("%.2f %s", amount, getCurrencyDisplayName(currency));
         player.sendMessage(getMsg("commands.check.write-success", "§a§l✔ §aYou signed a check of §e%amount%&a!")
@@ -751,7 +867,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        String formattedAmount = currency.equalsIgnoreCase("default") ? econ.format(amount) : String.format("%.2f %s", amount, getCurrencyDisplayName(currency));
+        String formattedAmount = currency.equalsIgnoreCase("default") ? econ.format(amount)
+                : String.format("%.2f %s", amount, getCurrencyDisplayName(currency));
         String formattedTax = String.format("%.2f %s", tax, getCurrencyDisplayName(currency));
 
         if (tax > 0) {
@@ -770,7 +887,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         }
 
         if (targetOnline) {
-            String formattedDep = currency.equalsIgnoreCase("default") ? econ.format(depositAmount) : String.format("%.2f %s", depositAmount, getCurrencyDisplayName(currency));
+            String formattedDep = currency.equalsIgnoreCase("default") ? econ.format(depositAmount)
+                    : String.format("%.2f %s", depositAmount, getCurrencyDisplayName(currency));
             target.getPlayer().sendMessage(
                     getMsg("commands.pay.success-receiver", "&a&l✔ &aYou received &e%amount% &afrom &e%sender%&a.")
                             .replace("%amount%", formattedDep)
@@ -801,16 +919,21 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             }
 
             if (args.length < 3) {
-                sender.sendMessage("§cUsage: /vaultx admin snapshot <create [label] | list | rollback <id> [player] | delete <id>>");
+                sender.sendMessage(
+                        "§cUsage: /vaultx admin snapshot <create [label] | list | rollback <id> [player] | delete <id>>");
                 return;
             }
 
             String sub = args[2].toLowerCase();
             if (sub.equals("create")) {
-                String snapLabel = args.length >= 4 ? String.join(" ", java.util.Arrays.copyOfRange(args, 3, args.length)) : "Manual Admin Snapshot";
+                String snapLabel = args.length >= 4
+                        ? String.join(" ", java.util.Arrays.copyOfRange(args, 3, args.length))
+                        : "Manual Admin Snapshot";
                 sender.sendMessage("§eCreating atomic economy snapshot...");
                 snapshotAPI.createSnapshotAsync(snapLabel).thenAccept(snap -> {
-                    sender.sendMessage("§a✔ Snapshot created! ID: §e" + snap.snapshotId() + " §7(" + snap.totalAccountsCaptured() + " accounts, Net Worth: $" + String.format("%.2f", snap.totalNetWorth()) + ")");
+                    sender.sendMessage(
+                            "§a✔ Snapshot created! ID: §e" + snap.snapshotId() + " §7(" + snap.totalAccountsCaptured()
+                                    + " accounts, Net Worth: $" + String.format("%.2f", snap.totalNetWorth()) + ")");
                 });
             } else if (sub.equals("list")) {
                 snapshotAPI.getSnapshotsAsync(10).thenAccept(list -> {
@@ -820,7 +943,9 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                     }
                     sender.sendMessage("§6--- VaultX Economy Snapshots ---");
                     for (var snap : list) {
-                        sender.sendMessage("§e" + snap.snapshotId() + " §7- " + snap.label() + " §8(" + snap.totalAccountsCaptured() + " accounts, $" + String.format("%.2f", snap.totalNetWorth()) + ")");
+                        sender.sendMessage("§e" + snap.snapshotId() + " §7- " + snap.label() + " §8("
+                                + snap.totalAccountsCaptured() + " accounts, $"
+                                + String.format("%.2f", snap.totalNetWorth()) + ")");
                     }
                 });
             } else if (sub.equals("rollback")) {
@@ -839,16 +964,20 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                     sender.sendMessage("§eRolling back player " + targetPlayer + " to snapshot " + snapId + "...");
                     snapshotAPI.restorePlayerSnapshotAsync(target.getUniqueId(), snapId).thenAccept(success -> {
                         if (success) {
-                            sender.sendMessage("§a✔ Successfully restored player " + targetPlayer + " to snapshot " + snapId + "!");
+                            sender.sendMessage("§a✔ Successfully restored player " + targetPlayer + " to snapshot "
+                                    + snapId + "!");
                         } else {
-                            sender.sendMessage("§cFailed to restore player snapshot. Snapshot ID or player data not found.");
+                            sender.sendMessage(
+                                    "§cFailed to restore player snapshot. Snapshot ID or player data not found.");
                         }
                     });
                 } else {
                     sender.sendMessage("§eRolling back ENTIRE SERVER economy to snapshot " + snapId + "...");
                     snapshotAPI.restoreServerSnapshotAsync(snapId).thenAccept(success -> {
                         if (success) {
-                            sender.sendMessage("§a✔ SERVER ECONOMY ROLLBACK COMPLETE! All account balances restored to snapshot " + snapId + "!");
+                            sender.sendMessage(
+                                    "§a✔ SERVER ECONOMY ROLLBACK COMPLETE! All account balances restored to snapshot "
+                                            + snapId + "!");
                         } else {
                             sender.sendMessage("§cFailed to restore server snapshot. Invalid Snapshot ID.");
                         }
@@ -868,19 +997,22 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                     }
                 });
             } else {
-                sender.sendMessage("§cUsage: /vaultx admin snapshot <create [label] | list | rollback <id> [player] | delete <id>>");
+                sender.sendMessage(
+                        "§cUsage: /vaultx admin snapshot <create [label] | list | rollback <id> [player] | delete <id>>");
             }
             return;
         }
 
         if (action.equalsIgnoreCase("tax")) {
             if (args.length < 5 || !args[2].equalsIgnoreCase("set")) {
-                sender.sendMessage(getMsg("commands.admin.tax.usage", "&cUsage: /vaultx admin tax set <payday/pay/exchange> <percent>"));
+                sender.sendMessage(getMsg("commands.admin.tax.usage",
+                        "&cUsage: /vaultx admin tax set <payday/pay/exchange> <percent>"));
                 return;
             }
             String taxType = args[3].toLowerCase();
             if (!taxType.equals("payday") && !taxType.equals("pay") && !taxType.equals("exchange")) {
-                sender.sendMessage(getMsg("commands.admin.tax.invalid-type", "&cInvalid tax type. Choices: payday, pay, exchange"));
+                sender.sendMessage(getMsg("commands.admin.tax.invalid-type",
+                        "&cInvalid tax type. Choices: payday, pay, exchange"));
                 return;
             }
             double percent;
@@ -889,13 +1021,15 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 if (percent > 100)
                     throw new NumberFormatException();
             } catch (NumberFormatException e) {
-                sender.sendMessage(getMsg("commands.admin.tax.invalid-percent", "&cInvalid percentage. It must be a number between 0 and 100."));
+                sender.sendMessage(getMsg("commands.admin.tax.invalid-percent",
+                        "&cInvalid percentage. It must be a number between 0 and 100."));
                 return;
             }
             Vault.setDynamicTaxPercent(taxType, percent);
-            sender.sendMessage(getMsg("commands.admin.tax.success", "&a&l✔ &aTax for &e%type% &ahas been set to &e%percent%%&a.")
-                    .replace("%type%", taxType)
-                    .replace("%percent%", String.valueOf(percent)));
+            sender.sendMessage(
+                    getMsg("commands.admin.tax.success", "&a&l✔ &aTax for &e%type% &ahas been set to &e%percent%%&a.")
+                            .replace("%type%", taxType)
+                            .replace("%percent%", String.valueOf(percent)));
             return;
         }
 
@@ -912,19 +1046,26 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             double exchangeTax = cb != null ? cb.getExchangeTaxPercent() : 1.0;
 
             sender.sendMessage(getMsg("commands.admin.treasury.header", "&b&l=== VaultX Public Treasury ==="));
-            sender.sendMessage(getMsg("commands.admin.treasury.balance", "&fState Balance: &e%amount%").replace("%amount%", econ.format(balance)));
-            sender.sendMessage(getMsg("commands.admin.treasury.account", "&fTreasury Account: &e%account%").replace("%account%", treasuryAccount));
+            sender.sendMessage(getMsg("commands.admin.treasury.balance", "&fState Balance: &e%amount%")
+                    .replace("%amount%", econ.format(balance)));
+            sender.sendMessage(getMsg("commands.admin.treasury.account", "&fTreasury Account: &e%account%")
+                    .replace("%account%", treasuryAccount));
             sender.sendMessage(getMsg("commands.admin.treasury.taxes-header", "&b-- Current Taxes --"));
-            sender.sendMessage(getMsg("commands.admin.treasury.taxes-payday", "  &fSalary Tax: &e%percent%%").replace("%percent%", String.valueOf(paydayTax)));
-            sender.sendMessage(getMsg("commands.admin.treasury.taxes-pay", "  &fPayment Tax: &e%percent%%").replace("%percent%", String.valueOf(payTax)));
-            sender.sendMessage(getMsg("commands.admin.treasury.taxes-exchange", "  &fExchange Tax (Forex): &e%percent%%").replace("%percent%", String.valueOf(exchangeTax)));
+            sender.sendMessage(getMsg("commands.admin.treasury.taxes-payday", "  &fSalary Tax: &e%percent%%")
+                    .replace("%percent%", String.valueOf(paydayTax)));
+            sender.sendMessage(getMsg("commands.admin.treasury.taxes-pay", "  &fPayment Tax: &e%percent%%")
+                    .replace("%percent%", String.valueOf(payTax)));
+            sender.sendMessage(
+                    getMsg("commands.admin.treasury.taxes-exchange", "  &fExchange Tax (Forex): &e%percent%%")
+                            .replace("%percent%", String.valueOf(exchangeTax)));
             sender.sendMessage(getMsg("commands.admin.treasury.footer", "&b&l======================================="));
             return;
         }
 
         if (action.equalsIgnoreCase("subvention")) {
             if (args.length < 4) {
-                sender.sendMessage(getMsg("commands.admin.subvention.usage", "&cUsage: /vaultx admin subvention <bank_name> <amount>"));
+                sender.sendMessage(getMsg("commands.admin.subvention.usage",
+                        "&cUsage: /vaultx admin subvention <bank_name> <amount>"));
                 return;
             }
             String bName = args[2].toLowerCase();
@@ -932,13 +1073,15 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             try {
                 amount = parsePositiveDouble(args[3]);
             } catch (NumberFormatException e) {
-                sender.sendMessage(getMsg("commands.admin.subvention.invalid-amount", "&cInvalid amount. It must be a positive number."));
+                sender.sendMessage(getMsg("commands.admin.subvention.invalid-amount",
+                        "&cInvalid amount. It must be a positive number."));
                 return;
             }
 
             net.milkbowl.vault.redis.LocalFailoverManager fm = Vault.getFailoverManager();
             if (fm.getBankAccountOwner(bName) == null) {
-                sender.sendMessage(getMsg("commands.admin.subvention.bank-not-found", "&cShared bank account '%bank%' does not exist.").replace("%bank%", bName));
+                sender.sendMessage(getMsg("commands.admin.subvention.bank-not-found",
+                        "&cShared bank account '%bank%' does not exist.").replace("%bank%", bName));
                 return;
             }
 
@@ -950,7 +1093,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             }
 
             if (treasuryBalance < amount) {
-                sender.sendMessage(getMsg("commands.admin.subvention.insufficient-funds", "&cThe Public Treasury does not have enough funds (%amount% available).")
+                sender.sendMessage(getMsg("commands.admin.subvention.insufficient-funds",
+                        "&cThe Public Treasury does not have enough funds (%amount% available).")
                         .replace("%amount%", econ.format(treasuryBalance)));
                 return;
             }
@@ -965,7 +1109,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             double currentBank = fm.getBankBalance(bName);
             fm.saveBankBalance(bName, currentBank + amount);
 
-            sender.sendMessage(getMsg("commands.admin.subvention.success", "&a&l✔ &aSubvention of &e%amount% &agranted to bank &e%bank%&a.")
+            sender.sendMessage(getMsg("commands.admin.subvention.success",
+                    "&a&l✔ &aSubvention of &e%amount% &agranted to bank &e%bank%&a.")
                     .replace("%amount%", econ.format(amount))
                     .replace("%bank%", bName));
             return;
@@ -1203,7 +1348,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
 
         sender.sendMessage(getMsg("commands.admin.audit-fetching", "§eFetching security audits... Please wait."));
 
-        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+        runAsync(() -> {
             int pageSize = 6;
             java.util.List<net.milkbowl.vault.redis.LocalFailoverManager.AuditRecord> records;
 
@@ -1212,14 +1357,14 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             } else {
                 OfflinePlayer target = resolvePlayerFast(targetStr);
                 if (target == null) {
-                    net.milkbowl.vault.util.FoliaScheduler.runSync(plugin,
+                    runSync(
                             () -> sender.sendMessage(getMsg("general.player-not-found", "§cPlayer not found.")));
                     return;
                 }
                 records = fm.getSecurityAudits(target.getUniqueId(), page, pageSize);
             }
 
-            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+            runSync(() -> {
                 if (records.isEmpty()) {
                     sender.sendMessage(getMsg("commands.admin.audit-empty",
                             "§e§l[VaultX Audit] §cNo audit logs found for '%target%' on page %page%.")
@@ -1319,37 +1464,50 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         if (econ == null)
             return suggestions;
 
-        String cmdName = command instanceof VaultXDynamicCommand ? ((VaultXDynamicCommand) command).getOriginalName().toLowerCase() : command.getName().toLowerCase();
+        String cmdName = command instanceof VaultXDynamicCommand
+                ? ((VaultXDynamicCommand) command).getOriginalName().toLowerCase()
+                : command.getName().toLowerCase();
         currentOriginalName.set(cmdName);
         currentLabel.set(alias.toLowerCase());
 
-        if ((cmdName.equals("money") || cmdName.equals("balance") || cmdName.equals("bal")) && (args.length == 0 || !args[0].equalsIgnoreCase("balance"))) {
+        if ((cmdName.equals("money") || cmdName.equals("balance") || cmdName.equals("bal"))
+                && (args.length == 0 || !args[0].equalsIgnoreCase("balance"))) {
             return onTabComplete(sender, command, alias, toVxArgs("balance", args));
         } else if (cmdName.equals("pay") && (args.length == 0 || !args[0].equalsIgnoreCase("pay"))) {
             return onTabComplete(sender, command, alias, toVxArgs("pay", args));
-        } else if ((cmdName.equals("baltop") || cmdName.equals("moneytop")) && (args.length == 0 || !args[0].equalsIgnoreCase("top"))) {
+        } else if ((cmdName.equals("baltop") || cmdName.equals("moneytop"))
+                && (args.length == 0 || !args[0].equalsIgnoreCase("top"))) {
             return onTabComplete(sender, command, alias, toVxArgs("top", args));
-        } else if ((cmdName.equals("bank") || cmdName.equals("sharedbank")) && (args.length == 0 || !args[0].equalsIgnoreCase("bank"))) {
+        } else if ((cmdName.equals("bank") || cmdName.equals("sharedbank"))
+                && (args.length == 0 || !args[0].equalsIgnoreCase("bank"))) {
             return onTabComplete(sender, command, alias, toVxArgs("bank", args));
-        } else if ((cmdName.equals("loan") || cmdName.equals("loans")) && (args.length == 0 || !args[0].equalsIgnoreCase("loan"))) {
+        } else if ((cmdName.equals("loan") || cmdName.equals("loans"))
+                && (args.length == 0 || !args[0].equalsIgnoreCase("loan"))) {
             return onTabComplete(sender, command, alias, toVxArgs("loan", args));
-        } else if ((cmdName.equals("mailbox") || cmdName.equals("mail")) && (args.length == 0 || !args[0].equalsIgnoreCase("mailbox"))) {
+        } else if ((cmdName.equals("mailbox") || cmdName.equals("mail"))
+                && (args.length == 0 || !args[0].equalsIgnoreCase("mailbox"))) {
             return onTabComplete(sender, command, alias, toVxArgs("mailbox", args));
         } else if (cmdName.equals("escrow") && (args.length == 0 || !args[0].equalsIgnoreCase("escrow"))) {
             return onTabComplete(sender, command, alias, toVxArgs("escrow", args));
-        } else if ((cmdName.equals("stocks") || cmdName.equals("stockmarket")) && (args.length == 0 || !args[0].equalsIgnoreCase("stocks"))) {
+        } else if ((cmdName.equals("stocks") || cmdName.equals("stockmarket"))
+                && (args.length == 0 || !args[0].equalsIgnoreCase("stocks"))) {
             return onTabComplete(sender, command, alias, toVxArgs("stocks", args));
-        } else if ((cmdName.equals("exchange") || cmdName.equals("forex") || cmdName.equals("convert")) && (args.length == 0 || !args[0].equalsIgnoreCase("exchange"))) {
+        } else if ((cmdName.equals("exchange") || cmdName.equals("forex") || cmdName.equals("convert"))
+                && (args.length == 0 || !args[0].equalsIgnoreCase("exchange"))) {
             return onTabComplete(sender, command, alias, toVxArgs("exchange", args));
-        } else if ((cmdName.equals("eco") || cmdName.equals("economy")) && (args.length == 0 || !args[0].equalsIgnoreCase("admin"))) {
+        } else if ((cmdName.equals("eco") || cmdName.equals("economy"))
+                && (args.length == 0 || !args[0].equalsIgnoreCase("admin"))) {
             return onTabComplete(sender, command, alias, toVxArgs("admin", args));
-        } else if ((cmdName.equals("check") || cmdName.equals("cheque")) && (args.length == 0 || !args[0].equalsIgnoreCase("check"))) {
+        } else if ((cmdName.equals("check") || cmdName.equals("cheque"))
+                && (args.length == 0 || !args[0].equalsIgnoreCase("check"))) {
             return onTabComplete(sender, command, alias, toVxArgs("check", args));
         } else if (cmdName.equals("payday") || cmdName.equals("salary")) {
             return Collections.emptyList();
-        } else if ((cmdName.equals("transactions") || cmdName.equals("tx") || cmdName.equals("history")) && (args.length == 0 || !args[0].equalsIgnoreCase("transactions"))) {
+        } else if ((cmdName.equals("transactions") || cmdName.equals("tx") || cmdName.equals("history"))
+                && (args.length == 0 || !args[0].equalsIgnoreCase("transactions"))) {
             return onTabComplete(sender, command, alias, toVxArgs("transactions", args));
-        } else if ((cmdName.equals("subscribe") || cmdName.equals("subscriptions")) && (args.length == 0 || !args[0].equalsIgnoreCase("subscribe"))) {
+        } else if ((cmdName.equals("subscribe") || cmdName.equals("subscriptions"))
+                && (args.length == 0 || !args[0].equalsIgnoreCase("subscribe"))) {
             return onTabComplete(sender, command, alias, toVxArgs("subscribe", args));
         }
 
@@ -1401,7 +1559,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 List<String> targets = new ArrayList<>();
                 Bukkit.getOnlinePlayers().forEach(p -> targets.add(p.getName()));
                 if (net.milkbowl.vault.Vault.getFailoverManager() != null) {
-                    targets.addAll(net.milkbowl.vault.Vault.getFailoverManager().getBanksForPlayer(((Player) sender).getUniqueId()));
+                    targets.addAll(net.milkbowl.vault.Vault.getFailoverManager()
+                            .getBanksForPlayer(((Player) sender).getUniqueId()));
                 }
                 return targets.stream()
                         .filter(s -> s.toLowerCase().startsWith(args[2].toLowerCase()))
@@ -1413,7 +1572,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             } else if (args.length == 3 && (args[1].equalsIgnoreCase("cancel") || args[1].equalsIgnoreCase("resume"))) {
                 if (sender instanceof Player) {
                     if (net.milkbowl.vault.Vault.getFailoverManager() != null) {
-                        return net.milkbowl.vault.Vault.getFailoverManager().getSubscriptionsForSubscriber(((Player) sender).getUniqueId()).stream()
+                        return net.milkbowl.vault.Vault.getFailoverManager()
+                                .getSubscriptionsForSubscriber(((Player) sender).getUniqueId()).stream()
                                 .map(s -> s.id)
                                 .filter(s -> s.toLowerCase().startsWith(args[2].toLowerCase()))
                                 .collect(Collectors.toList());
@@ -1744,8 +1904,10 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
     }
 
     private void handleTop(CommandSender sender, Economy econ, String[] args) {
-        if (!sender.hasPermission("vault.top") && !sender.hasPermission("vault.balance.top") && !sender.hasPermission("vault.admin")) {
-            sender.sendMessage(getMsg("general.no-permission", "§cYou do not have permission to execute this command!"));
+        if (!sender.hasPermission("vault.top") && !sender.hasPermission("vault.balance.top")
+                && !sender.hasPermission("vault.admin")) {
+            sender.sendMessage(
+                    getMsg("general.no-permission", "§cYou do not have permission to execute this command!"));
             return;
         }
 
@@ -1782,8 +1944,26 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         List<net.milkbowl.vault.redis.VaultRedisManager.LeaderboardEntry> leaderboard = redis.getLeaderboard(currency);
         List<String> excluded = plugin.getConfig().getStringList("baltop.excluded-accounts");
         if (excluded != null && !excluded.isEmpty()) {
-            List<String> lowerExcluded = excluded.stream().map(String::toLowerCase).collect(java.util.stream.Collectors.toList());
-            leaderboard = leaderboard.stream().filter(e -> e != null && !lowerExcluded.contains(e.name.toLowerCase())).collect(java.util.stream.Collectors.toList());
+            List<String> lowerExcluded = excluded.stream().map(String::toLowerCase)
+                    .collect(java.util.stream.Collectors.toList());
+            leaderboard = leaderboard.stream().filter(e -> e != null && !lowerExcluded.contains(e.name.toLowerCase()))
+                    .collect(java.util.stream.Collectors.toList());
+        }
+
+        boolean hideVanished = plugin.getConfig().getBoolean("baltop.hide-vanished-players", true);
+        if (hideVanished) {
+            leaderboard = leaderboard.stream().filter(e -> {
+                if (e == null)
+                    return false;
+                org.bukkit.entity.Player p = Bukkit.getPlayerExact(e.name);
+                if (p != null) {
+                    for (org.bukkit.metadata.MetadataValue meta : p.getMetadata("vanished")) {
+                        if (meta.asBoolean())
+                            return false;
+                    }
+                }
+                return true;
+            }).collect(java.util.stream.Collectors.toList());
         }
         if (leaderboard.isEmpty()) {
             sender.sendMessage(
@@ -1840,7 +2020,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         Player player = (Player) sender;
         boolean subEnabled = plugin.getConfig().getBoolean("subscriptions.enabled", true);
         if (!subEnabled) {
-            player.sendMessage(getMsg("commands.subscribe.disabled", "§cThe recurring subscription system is disabled on this server."));
+            player.sendMessage(getMsg("commands.subscribe.disabled",
+                    "§cThe recurring subscription system is disabled on this server."));
             return;
         }
 
@@ -1858,7 +2039,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
 
         if (action.equals("create")) {
             if (args.length < 5) {
-                player.sendMessage(getMsg("commands.subscribe.create-usage", "§cUsage: /subscribe create <player/bank> <amount> <hours> [currency]"));
+                player.sendMessage(getMsg("commands.subscribe.create-usage",
+                        "§cUsage: /subscribe create <player/bank> <amount> <hours> [currency]"));
                 return;
             }
 
@@ -1874,9 +2056,11 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             int hours;
             try {
                 hours = Integer.parseInt(args[4]);
-                if (hours < 1) throw new NumberFormatException();
+                if (hours < 1)
+                    throw new NumberFormatException();
             } catch (NumberFormatException e) {
-                player.sendMessage(getMsg("commands.subscribe.invalid-hours", "§cInvalid interval. It must be at least 1 hour."));
+                player.sendMessage(
+                        getMsg("commands.subscribe.invalid-hours", "§cInvalid interval. It must be at least 1 hour."));
                 return;
             }
 
@@ -1896,7 +2080,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 targetName = targetInput.toUpperCase() + " (Bank)";
             } else {
                 OfflinePlayer targetPlayer = resolvePlayerFast(targetInput);
-                if (targetPlayer == null || (!net.milkbowl.vault.util.UUIDCache.hasPlayedBeforeFast(targetPlayer) && !targetPlayer.isOnline())) {
+                if (targetPlayer == null || (!net.milkbowl.vault.util.UUIDCache.hasPlayedBeforeFast(targetPlayer)
+                        && !targetPlayer.isOnline())) {
                     player.sendMessage(getMsg("general.player-not-found", "§cPlayer or bank not found."));
                     return;
                 }
@@ -1909,10 +2094,12 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 targetName = targetPlayer.getName() != null ? targetPlayer.getName() : "Unknown";
             }
 
-            List<net.milkbowl.vault.redis.LocalFailoverManager.SubscriptionRecord> existing = fm.getSubscriptionsForSubscriber(player.getUniqueId());
+            List<net.milkbowl.vault.redis.LocalFailoverManager.SubscriptionRecord> existing = fm
+                    .getSubscriptionsForSubscriber(player.getUniqueId());
             int limit = plugin.getConfig().getInt("subscriptions.max-active-per-player", 10);
             if (limit > 0 && existing.stream().filter(s -> s.status.equalsIgnoreCase("ACTIVE")).count() >= limit) {
-                player.sendMessage(getMsg("commands.subscribe.limit-exceeded", "§cYou have reached the limit of %limit% active subscriptions.")
+                player.sendMessage(getMsg("commands.subscribe.limit-exceeded",
+                        "§cYou have reached the limit of %limit% active subscriptions.")
                         .replace("%limit%", String.valueOf(limit)));
                 return;
             }
@@ -1929,19 +2116,19 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                     0,
                     System.currentTimeMillis(),
                     "ACTIVE",
-                    System.currentTimeMillis()
-            );
+                    System.currentTimeMillis());
 
-            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+            runAsync(() -> {
                 net.milkbowl.vault.economy.SubscriptionManager sm = net.milkbowl.vault.Vault.getSubscriptionManager();
                 if (sm != null) {
                     fm.saveSubscription(sub);
                     sm.processSingleSubscription(econ, sub, System.currentTimeMillis());
-                    
-                    net.milkbowl.vault.redis.LocalFailoverManager.SubscriptionRecord updated = fm.getSubscription(subId);
-                    net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+
+                    net.milkbowl.vault.redis.LocalFailoverManager.SubscriptionRecord updated = fm
+                            .getSubscription(subId);
+                    runSync(() -> {
                         if (updated != null && updated.status.equalsIgnoreCase("SUSPENDED")) {
-                            player.sendMessage(getMsg("commands.subscribe.created-suspended", 
+                            player.sendMessage(getMsg("commands.subscribe.created-suspended",
                                     "§e§l[Subscription] §cSubscription #%id% created to %target% but immediately suspended due to insufficient balance.")
                                     .replace("%id%", subId)
                                     .replace("%target%", targetName));
@@ -1950,7 +2137,10 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                                     "§a§l✔ §aSubscription #%id% successfully created to %target% for %amount% every %hours% hour(s).")
                                     .replace("%id%", subId)
                                     .replace("%target%", targetName)
-                                    .replace("%amount%", currency.equalsIgnoreCase("default") ? econ.format(amount) : String.format("%.2f %s", amount, getCurrencyDisplayName(currency)))
+                                    .replace("%amount%",
+                                            currency.equalsIgnoreCase("default") ? econ.format(amount)
+                                                    : String.format("%.2f %s", amount,
+                                                            getCurrencyDisplayName(currency)))
                                     .replace("%hours%", String.valueOf(hours)));
                         }
                     });
@@ -1958,14 +2148,17 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             });
 
         } else if (action.equals("list")) {
-            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
-                List<net.milkbowl.vault.redis.LocalFailoverManager.SubscriptionRecord> subs = fm.getSubscriptionsForSubscriber(player.getUniqueId());
-                net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+            runAsync(() -> {
+                List<net.milkbowl.vault.redis.LocalFailoverManager.SubscriptionRecord> subs = fm
+                        .getSubscriptionsForSubscriber(player.getUniqueId());
+                runSync(() -> {
                     if (subs.isEmpty()) {
-                        player.sendMessage(getMsg("commands.subscribe.list-empty", "§e§l[Subscription] §7You have no active or suspended subscriptions."));
+                        player.sendMessage(getMsg("commands.subscribe.list-empty",
+                                "§e§l[Subscription] §7You have no active or suspended subscriptions."));
                         return;
                     }
-                    player.sendMessage(getMsg("commands.subscribe.list-header", "&d&l📬 Your Recurring Subscriptions 📬"));
+                    player.sendMessage(
+                            getMsg("commands.subscribe.list-header", "&d&l📬 Your Recurring Subscriptions 📬"));
                     for (net.milkbowl.vault.redis.LocalFailoverManager.SubscriptionRecord s : subs) {
                         String tName = s.target;
                         if (s.targetType.equalsIgnoreCase("PLAYER")) {
@@ -1976,8 +2169,10 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                         }
 
                         String statusColor = s.status.equalsIgnoreCase("ACTIVE") ? "§a" : "§c";
-                        String formattedAmt = s.currency.equalsIgnoreCase("default") ? econ.format(s.amount) : String.format("%.2f %s", s.amount, getCurrencyDisplayName(s.currency));
-                        player.sendMessage(getMsg("commands.subscribe.list-entry", "&8- &fID: &e%id% &8| &fTarget: &b%target% &8| &fAmount: &7%amount% &8| &fFreq: &7%hours%h &8| Status: %color%%status%")
+                        String formattedAmt = s.currency.equalsIgnoreCase("default") ? econ.format(s.amount)
+                                : String.format("%.2f %s", s.amount, getCurrencyDisplayName(s.currency));
+                        player.sendMessage(getMsg("commands.subscribe.list-entry",
+                                "&8- &fID: &e%id% &8| &fTarget: &b%target% &8| &fAmount: &7%amount% &8| &fFreq: &7%hours%h &8| Status: %color%%status%")
                                 .replace("%id%", s.id)
                                 .replace("%target%", tName)
                                 .replace("%amount%", formattedAmt)
@@ -1994,7 +2189,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 return;
             }
             String subId = args[2];
-            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+            runAsync(() -> {
                 net.milkbowl.vault.redis.LocalFailoverManager.SubscriptionRecord s = fm.getSubscription(subId);
                 if (s == null || !s.subscriber.equals(player.getUniqueId())) {
                     player.sendMessage(getMsg("commands.subscribe.not-found", "§cSubscription not found."));
@@ -2009,8 +2204,9 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                     tName = s.target.toUpperCase() + " (Bank)";
                 }
                 final String finalTarget = tName;
-                net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
-                    player.sendMessage(getMsg("commands.subscribe.cancel-success", "§a§l✔ §aSubscription #%id% to %target% has been cancelled.")
+                runSync(() -> {
+                    player.sendMessage(getMsg("commands.subscribe.cancel-success",
+                            "§a§l✔ §aSubscription #%id% to %target% has been cancelled.")
                             .replace("%id%", subId)
                             .replace("%target%", finalTarget));
                 });
@@ -2022,25 +2218,28 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 return;
             }
             String subId = args[2];
-            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+            runAsync(() -> {
                 net.milkbowl.vault.redis.LocalFailoverManager.SubscriptionRecord s = fm.getSubscription(subId);
                 if (s == null || !s.subscriber.equals(player.getUniqueId())) {
                     player.sendMessage(getMsg("commands.subscribe.not-found", "§cSubscription not found."));
                     return;
                 }
                 if (s.status.equalsIgnoreCase("ACTIVE")) {
-                    player.sendMessage(getMsg("commands.subscribe.already-active", "§cThis subscription is already active."));
+                    player.sendMessage(
+                            getMsg("commands.subscribe.already-active", "§cThis subscription is already active."));
                     return;
                 }
 
                 fm.updateSubscriptionBilling(subId, s.lastBilling, System.currentTimeMillis(), "ACTIVE");
                 net.milkbowl.vault.economy.SubscriptionManager sm = net.milkbowl.vault.Vault.getSubscriptionManager();
                 if (sm != null) {
-                    net.milkbowl.vault.redis.LocalFailoverManager.SubscriptionRecord reloaded = fm.getSubscription(subId);
+                    net.milkbowl.vault.redis.LocalFailoverManager.SubscriptionRecord reloaded = fm
+                            .getSubscription(subId);
                     sm.processSingleSubscription(econ, reloaded, System.currentTimeMillis());
-                    
-                    net.milkbowl.vault.redis.LocalFailoverManager.SubscriptionRecord updated = fm.getSubscription(subId);
-                    net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+
+                    net.milkbowl.vault.redis.LocalFailoverManager.SubscriptionRecord updated = fm
+                            .getSubscription(subId);
+                    runSync(() -> {
                         if (updated != null && updated.status.equalsIgnoreCase("SUSPENDED")) {
                             player.sendMessage(getMsg("commands.subscribe.resume-failed",
                                     "§c§l[Subscription] §cCould not reactivate subscription #%id% because your balance is still insufficient.")
@@ -2061,10 +2260,14 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
 
     private void sendSubscribeHelp(Player player) {
         player.sendMessage(getMsg("commands.subscribe.help-header", "&d&l=== VaultX Subscription Help ==="));
-        player.sendMessage(getMsg("commands.subscribe.help-create", "&e/subscribe create <player/bank> <amount> <hours> [currency] &7- Create a subscription"));
-        player.sendMessage(getMsg("commands.subscribe.help-list", "&e/subscribe list &7- View your active and suspended subscriptions"));
-        player.sendMessage(getMsg("commands.subscribe.help-cancel", "&e/subscribe cancel <id> &7- Cancel a subscription"));
-        player.sendMessage(getMsg("commands.subscribe.help-resume", "&e/subscribe resume <id> &7- Reactivate a suspended subscription"));
+        player.sendMessage(getMsg("commands.subscribe.help-create",
+                "&e/subscribe create <player/bank> <amount> <hours> [currency] &7- Create a subscription"));
+        player.sendMessage(getMsg("commands.subscribe.help-list",
+                "&e/subscribe list &7- View your active and suspended subscriptions"));
+        player.sendMessage(
+                getMsg("commands.subscribe.help-cancel", "&e/subscribe cancel <id> &7- Cancel a subscription"));
+        player.sendMessage(getMsg("commands.subscribe.help-resume",
+                "&e/subscribe resume <id> &7- Reactivate a suspended subscription"));
         player.sendMessage(getMsg("commands.subscribe.help-footer", "&d&l================================"));
     }
 
@@ -2098,12 +2301,12 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
 
         sender.sendMessage(getMsg("commands.transactions.fetching", "§eFetching transaction history... Please wait."));
 
-        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+        runAsync(() -> {
             int pageSize = 8;
             List<net.milkbowl.vault.redis.LocalFailoverManager.PlayerTransactionRecord> txs = fm
                     .getPlayerTransactions(player.getUniqueId(), page, pageSize);
 
-            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+            runSync(() -> {
                 if (txs.isEmpty()) {
                     sender.sendMessage(getMsg("commands.transactions.empty",
                             "§d§l[VaultX History] §cNo transaction history found on page %page%.")
@@ -2129,7 +2332,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                             .replace("%type%", tx.type)
                             .replace("%amount%",
                                     tx.currency.equalsIgnoreCase("default")
-                                            ? (getEconomy() != null ? getEconomy().format(tx.amount) : String.format("%.2f", tx.amount))
+                                            ? (getEconomy() != null ? getEconomy().format(tx.amount)
+                                                    : String.format("%.2f", tx.amount))
                                             : String.format("%.2f", tx.amount))
                             .replace("%currency%", getCurrencyDisplayName(tx.currency))
                             .replace("%other%", other));
@@ -2175,7 +2379,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         final double finalWriteLatency = writeLatency;
 
         // Run currency stats query asynchronously
-        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+        runAsync(() -> {
             List<String> currencies = getCurrencies(econ);
             java.util.Map<String, String> currencyStatsLines = new java.util.LinkedHashMap<>();
 
@@ -2215,7 +2419,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 }
             }
 
-            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+            runSync(() -> {
                 sender.sendMessage(getMsg("commands.admin.stats-header", "§b§l=== VaultX Telemetry & Statistics ==="));
                 if (econ instanceof net.milkbowl.vault.economy.OptimizedEconomy) {
                     sender.sendMessage(getMsg("commands.admin.stats-cache-rate",
@@ -2249,22 +2453,26 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
 
         net.milkbowl.vault.redis.LocalFailoverManager fm = net.milkbowl.vault.Vault.getFailoverManager();
         if (fm == null) {
-            sender.sendMessage(getMsg("commands.transactions.database-error", "§cDatabase manager is not initialized."));
+            sender.sendMessage(
+                    getMsg("commands.transactions.database-error", "§cDatabase manager is not initialized."));
             return;
         }
 
         net.milkbowl.vault.redis.VaultRedisManager redis = net.milkbowl.vault.redis.VaultRedisManager.getInstance();
         boolean redisOnline = redis != null && redis.isOnline();
 
-        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+        runAsync(() -> {
             List<String> currencies = getCurrencies(econ);
             java.util.Map<String, net.milkbowl.vault.redis.LocalFailoverManager.LocalCurrencyStats> currencyStats = new java.util.HashMap<>();
 
             for (String currency : currencies) {
                 if (redisOnline) {
-                    net.milkbowl.vault.redis.VaultRedisManager.CurrencyStats stats = redis.getGlobalCurrencyStats(currency);
+                    net.milkbowl.vault.redis.VaultRedisManager.CurrencyStats stats = redis
+                            .getGlobalCurrencyStats(currency);
                     if (stats != null) {
-                        currencyStats.put(currency, new net.milkbowl.vault.redis.LocalFailoverManager.LocalCurrencyStats(stats.totalMoney, stats.accountsCount, stats.averageBalance));
+                        currencyStats.put(currency,
+                                new net.milkbowl.vault.redis.LocalFailoverManager.LocalCurrencyStats(stats.totalMoney,
+                                        stats.accountsCount, stats.averageBalance));
                     } else {
                         currencyStats.put(currency, fm.getLocalCurrencyStats(currency));
                     }
@@ -2292,9 +2500,10 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 leaderboard = fm.getLocalLeaderboard("default", 10);
             }
 
-            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
-                sender.sendMessage(getMsg("commands.admin.stats-header", "§b§l=== VaultX Macroeconomic Statistics ==="));
-                
+            runSync(() -> {
+                sender.sendMessage(
+                        getMsg("commands.admin.stats-header", "§b§l=== VaultX Macroeconomic Statistics ==="));
+
                 sender.sendMessage("§b-- Currency Supply & Accounts --");
                 for (String curr : currencies) {
                     net.milkbowl.vault.redis.LocalFailoverManager.LocalCurrencyStats stats = currencyStats.get(curr);
@@ -2302,8 +2511,10 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                     long accs = stats != null ? stats.accountsCount : 0;
                     double avg = stats != null ? stats.averageBalance : 0.0;
 
-                    String formatTotal = curr.equals("default") ? econ.format(total) : String.format("%.2f %s", total, curr.toUpperCase());
-                    String formatAvg = curr.equals("default") ? econ.format(avg) : String.format("%.2f %s", avg, curr.toUpperCase());
+                    String formatTotal = curr.equals("default") ? econ.format(total)
+                            : String.format("%.2f %s", total, curr.toUpperCase());
+                    String formatAvg = curr.equals("default") ? econ.format(avg)
+                            : String.format("%.2f %s", avg, curr.toUpperCase());
 
                     sender.sendMessage("  §f" + curr.toUpperCase() + ":");
                     sender.sendMessage("    §7- Total Money Supply: §a" + formatTotal);
@@ -2322,22 +2533,26 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage("§b-- Rich List (Top 10 Default Currency) --");
                 int rank = 1;
                 for (net.milkbowl.vault.redis.VaultRedisManager.LeaderboardEntry entry : leaderboard) {
-                    if (rank > 10) break;
-                    sender.sendMessage(String.format("  §e#%d  §f%s  §8»  §a%s", rank, entry.name, econ.format(entry.balance)));
+                    if (rank > 10)
+                        break;
+                    sender.sendMessage(
+                            String.format("  §e#%d  §f%s  §8»  §a%s", rank, entry.name, econ.format(entry.balance)));
                     rank++;
                 }
                 if (leaderboard.isEmpty()) {
                     sender.sendMessage("  §cNo rich list data available.");
                 }
 
-                sender.sendMessage(getMsg("commands.admin.stats-footer", "§b§l========================================="));
+                sender.sendMessage(
+                        getMsg("commands.admin.stats-footer", "§b§l========================================="));
             });
         });
     }
 
     private void handleLogs(CommandSender sender, Economy econ, String[] args) {
         if (!sender.hasPermission("vault.admin")) {
-            sender.sendMessage(getMsg("commands.admin.no-permission", "§cYou do not have permission to execute admin commands."));
+            sender.sendMessage(
+                    getMsg("commands.admin.no-permission", "§cYou do not have permission to execute admin commands."));
             return;
         }
 
@@ -2351,7 +2566,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         if (args.length >= 3) {
             try {
                 pageVal = Integer.parseInt(args[2]);
-                if (pageVal < 1) pageVal = 1;
+                if (pageVal < 1)
+                    pageVal = 1;
             } catch (NumberFormatException e) {
                 sender.sendMessage(getMsg("commands.transactions.invalid-page", "§cInvalid page number."));
                 return;
@@ -2361,36 +2577,43 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         final int page = pageVal;
         net.milkbowl.vault.redis.LocalFailoverManager fm = net.milkbowl.vault.Vault.getFailoverManager();
         if (fm == null) {
-            sender.sendMessage(getMsg("commands.transactions.database-error", "§cDatabase manager is not initialized."));
+            sender.sendMessage(
+                    getMsg("commands.transactions.database-error", "§cDatabase manager is not initialized."));
             return;
         }
 
-        sender.sendMessage(getMsg("commands.logs.fetching", "§eFetching transaction logs for %player%...").replace("%player%", targetName));
+        sender.sendMessage(getMsg("commands.logs.fetching", "§eFetching transaction logs for %player%...")
+                .replace("%player%", targetName));
 
-        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+        runAsync(() -> {
             OfflinePlayer target = resolvePlayerFast(targetName);
-            if (target == null || (!net.milkbowl.vault.util.UUIDCache.hasPlayedBeforeFast(target) && !target.isOnline())) {
-                net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
-                    sender.sendMessage(getMsg("commands.admin.player-not-found", "§cPlayer '%player%' not found.").replace("%player%", targetName));
+            if (target == null
+                    || (!net.milkbowl.vault.util.UUIDCache.hasPlayedBeforeFast(target) && !target.isOnline())) {
+                runSync(() -> {
+                    sender.sendMessage(getMsg("commands.admin.player-not-found", "§cPlayer '%player%' not found.")
+                            .replace("%player%", targetName));
                 });
                 return;
             }
 
             int pageSize = 10;
-            List<net.milkbowl.vault.redis.LocalFailoverManager.PlayerTransactionRecord> txs = fm.getPlayerTransactions(target.getUniqueId(), page, pageSize);
+            List<net.milkbowl.vault.redis.LocalFailoverManager.PlayerTransactionRecord> txs = fm
+                    .getPlayerTransactions(target.getUniqueId(), page, pageSize);
 
-            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+            runSync(() -> {
                 if (txs.isEmpty()) {
-                    sender.sendMessage(getMsg("commands.logs.empty", "§d§l[VaultX Logs] §cNo transaction logs found for %player% on page %page%.")
+                    sender.sendMessage(getMsg("commands.logs.empty",
+                            "§d§l[VaultX Logs] §cNo transaction logs found for %player% on page %page%.")
                             .replace("%player%", target.getName() != null ? target.getName() : targetName)
                             .replace("%page%", String.valueOf(page)));
                     return;
                 }
 
                 String resolvedName = target.getName() != null ? target.getName() : targetName;
-                sender.sendMessage(getMsg("commands.logs.header", "§b§l=== Transaction Logs: %player% (Page %page%) ===")
-                        .replace("%player%", resolvedName)
-                        .replace("%page%", String.valueOf(page)));
+                sender.sendMessage(
+                        getMsg("commands.logs.header", "§b§l=== Transaction Logs: %player% (Page %page%) ===")
+                                .replace("%player%", resolvedName)
+                                .replace("%page%", String.valueOf(page)));
 
                 java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("dd/MM HH:mm");
                 java.text.SimpleDateFormat sdfHover = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
@@ -2400,7 +2623,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                     String hoverTime = sdfHover.format(new java.util.Date(tx.timestamp));
 
                     String typeUpper = tx.type.toUpperCase();
-                    boolean isDeposit = typeUpper.startsWith("DEPOSIT") || typeUpper.startsWith("CLAIMED") || typeUpper.contains("DIVIDEND") || typeUpper.contains("SALARY");
+                    boolean isDeposit = typeUpper.startsWith("DEPOSIT") || typeUpper.startsWith("CLAIMED")
+                            || typeUpper.contains("DIVIDEND") || typeUpper.contains("SALARY");
                     String actionColor = isDeposit ? "§a" : "§c";
                     String actionSymbol = isDeposit ? "+" : "-";
 
@@ -2415,27 +2639,30 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                     if (sender instanceof Player) {
                         Player playerSender = (Player) sender;
                         try {
-                            net.md_5.bungee.api.chat.TextComponent messageLine = new net.md_5.bungee.api.chat.TextComponent("§7[" + time + "] ");
-                            
-                            net.md_5.bungee.api.chat.TextComponent typeComp = new net.md_5.bungee.api.chat.TextComponent("§f" + cleanType + " ");
+                            net.md_5.bungee.api.chat.TextComponent messageLine = new net.md_5.bungee.api.chat.TextComponent(
+                                    "§7[" + time + "] ");
+
+                            net.md_5.bungee.api.chat.TextComponent typeComp = new net.md_5.bungee.api.chat.TextComponent(
+                                    "§f" + cleanType + " ");
                             typeComp.setHoverEvent(new net.md_5.bungee.api.chat.HoverEvent(
                                     net.md_5.bungee.api.chat.HoverEvent.Action.SHOW_TEXT,
-                                    new net.md_5.bungee.api.chat.ComponentBuilder("§7Category: §e" + tx.category + "\n§7Raw Type: §e" + tx.type).create()
-                            ));
-                            
-                            net.md_5.bungee.api.chat.TextComponent amountComp = new net.md_5.bungee.api.chat.TextComponent(actionColor + actionSymbol + formattedAmount + " ");
+                                    new net.md_5.bungee.api.chat.ComponentBuilder(
+                                            "§7Category: §e" + tx.category + "\n§7Raw Type: §e" + tx.type).create()));
+
+                            net.md_5.bungee.api.chat.TextComponent amountComp = new net.md_5.bungee.api.chat.TextComponent(
+                                    actionColor + actionSymbol + formattedAmount + " ");
                             amountComp.setHoverEvent(new net.md_5.bungee.api.chat.HoverEvent(
                                     net.md_5.bungee.api.chat.HoverEvent.Action.SHOW_TEXT,
-                                    new net.md_5.bungee.api.chat.ComponentBuilder("§7Date: §e" + hoverTime).create()
-                            ));
+                                    new net.md_5.bungee.api.chat.ComponentBuilder("§7Date: §e" + hoverTime).create()));
 
-                            net.md_5.bungee.api.chat.TextComponent arrowComp = new net.md_5.bungee.api.chat.TextComponent("§8» ");
-                            
-                            net.md_5.bungee.api.chat.TextComponent otherComp = new net.md_5.bungee.api.chat.TextComponent("§f" + other);
+                            net.md_5.bungee.api.chat.TextComponent arrowComp = new net.md_5.bungee.api.chat.TextComponent(
+                                    "§8» ");
+
+                            net.md_5.bungee.api.chat.TextComponent otherComp = new net.md_5.bungee.api.chat.TextComponent(
+                                    "§f" + other);
                             otherComp.setHoverEvent(new net.md_5.bungee.api.chat.HoverEvent(
                                     net.md_5.bungee.api.chat.HoverEvent.Action.SHOW_TEXT,
-                                    new net.md_5.bungee.api.chat.ComponentBuilder("§7Target/Source Party").create()
-                            ));
+                                    new net.md_5.bungee.api.chat.ComponentBuilder("§7Target/Source Party").create()));
 
                             messageLine.addExtra(typeComp);
                             messageLine.addExtra(amountComp);
@@ -2444,44 +2671,46 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
 
                             playerSender.spigot().sendMessage(messageLine);
                         } catch (Throwable t) {
-                            sender.sendMessage("§7[" + time + "] §f" + cleanType + " " + actionColor + actionSymbol + formattedAmount + " §8» §f" + other);
+                            sender.sendMessage("§7[" + time + "] §f" + cleanType + " " + actionColor + actionSymbol
+                                    + formattedAmount + " §8» §f" + other);
                         }
                     } else {
-                        sender.sendMessage("§7[" + time + "] §f" + cleanType + " " + actionColor + actionSymbol + formattedAmount + " §8» §f" + other);
+                        sender.sendMessage("§7[" + time + "] §f" + cleanType + " " + actionColor + actionSymbol
+                                + formattedAmount + " §8» §f" + other);
                     }
                 }
 
                 if (sender instanceof Player) {
                     Player playerSender = (Player) sender;
                     try {
-                        net.md_5.bungee.api.chat.TextComponent footer = new net.md_5.bungee.api.chat.TextComponent("§6§m+---------------------------------------------------+\n");
-                        
-                        net.md_5.bungee.api.chat.TextComponent prev = new net.md_5.bungee.api.chat.TextComponent("§e◀ Précédent");
+                        net.md_5.bungee.api.chat.TextComponent footer = new net.md_5.bungee.api.chat.TextComponent(
+                                "§6§m+---------------------------------------------------+\n");
+
+                        net.md_5.bungee.api.chat.TextComponent prev = new net.md_5.bungee.api.chat.TextComponent(
+                                "§e◀ Précédent");
                         if (page > 1) {
                             prev.setClickEvent(new net.md_5.bungee.api.chat.ClickEvent(
                                     net.md_5.bungee.api.chat.ClickEvent.Action.RUN_COMMAND,
-                                    "/vx logs " + targetName + " " + (page - 1)
-                            ));
+                                    "/vx logs " + targetName + " " + (page - 1)));
                             prev.setHoverEvent(new net.md_5.bungee.api.chat.HoverEvent(
                                     net.md_5.bungee.api.chat.HoverEvent.Action.SHOW_TEXT,
-                                    new net.md_5.bungee.api.chat.ComponentBuilder("§ePage " + (page - 1)).create()
-                            ));
+                                    new net.md_5.bungee.api.chat.ComponentBuilder("§ePage " + (page - 1)).create()));
                         } else {
                             prev.setColor(net.md_5.bungee.api.ChatColor.GRAY);
                         }
 
-                        net.md_5.bungee.api.chat.TextComponent mid = new net.md_5.bungee.api.chat.TextComponent("   §7|   Page " + page + "   |   ");
+                        net.md_5.bungee.api.chat.TextComponent mid = new net.md_5.bungee.api.chat.TextComponent(
+                                "   §7|   Page " + page + "   |   ");
 
-                        net.md_5.bungee.api.chat.TextComponent next = new net.md_5.bungee.api.chat.TextComponent("§eSuivant ▶");
+                        net.md_5.bungee.api.chat.TextComponent next = new net.md_5.bungee.api.chat.TextComponent(
+                                "§eSuivant ▶");
                         if (txs.size() == 10) {
                             next.setClickEvent(new net.md_5.bungee.api.chat.ClickEvent(
                                     net.md_5.bungee.api.chat.ClickEvent.Action.RUN_COMMAND,
-                                    "/vx logs " + targetName + " " + (page + 1)
-                            ));
+                                    "/vx logs " + targetName + " " + (page + 1)));
                             next.setHoverEvent(new net.md_5.bungee.api.chat.HoverEvent(
                                     net.md_5.bungee.api.chat.HoverEvent.Action.SHOW_TEXT,
-                                    new net.md_5.bungee.api.chat.ComponentBuilder("§ePage " + (page + 1)).create()
-                            ));
+                                    new net.md_5.bungee.api.chat.ComponentBuilder("§ePage " + (page + 1)).create()));
                         } else {
                             next.setColor(net.md_5.bungee.api.ChatColor.GRAY);
                         }
@@ -2493,11 +2722,13 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                         playerSender.spigot().sendMessage(footer);
                     } catch (Throwable t) {
                         sender.sendMessage("§6§m+---------------------------------------------------+");
-                        sender.sendMessage("§ePage " + page + " | Use /vx logs " + targetName + " " + (page + 1) + " for next page");
+                        sender.sendMessage("§ePage " + page + " | Use /vx logs " + targetName + " " + (page + 1)
+                                + " for next page");
                     }
                 } else {
                     sender.sendMessage("§6§m+---------------------------------------------------+");
-                    sender.sendMessage("Page " + page + " | Use /vx logs " + targetName + " " + (page + 1) + " for next page");
+                    sender.sendMessage(
+                            "Page " + page + " | Use /vx logs " + targetName + " " + (page + 1) + " for next page");
                 }
             });
         });
@@ -2533,11 +2764,11 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(
                 getMsg("commands.admin.report-fetching", "§eGenerating inflation analytics report... Please wait."));
 
-        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+        runAsync(() -> {
             java.util.List<net.milkbowl.vault.redis.LocalFailoverManager.AnalyticsReportEntry> report = fm
                     .getAnalyticsReport(days);
 
-            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+            runSync(() -> {
                 if (report.isEmpty()) {
                     sender.sendMessage(getMsg("commands.admin.report-empty",
                             "§d§l[VaultX Report] §cNo transaction records found for the last %days% days.")
@@ -2634,7 +2865,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
 
                 sender.sendMessage(getMsg("commands.escrow.initiating", "§eInitiating escrow transaction..."));
                 em.startEscrow((Player) sender, receiver, amount, currency, 300).thenAccept(res -> {
-                    net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                    runSync(() -> {
                         if (res.success) {
                             sender.sendMessage(getMsg("commands.escrow.success-started",
                                     "§a§l✔ §aEscrow transaction started! ID: §e%id%").replace("%id%", res.escrowId));
@@ -2658,7 +2889,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(
                         getMsg("commands.escrow.releasing", "§eReleasing escrow %id%...").replace("%id%", releaseId));
                 em.releaseEscrow(releaseId, sender).thenAccept(res -> {
-                    net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                    runSync(() -> {
                         if (res.success) {
                             sender.sendMessage(getMsg("commands.escrow.success-released",
                                     "§a§l✔ §aEscrow %id% released successfully!").replace("%id%", releaseId));
@@ -2679,7 +2910,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(
                         getMsg("commands.escrow.refunding", "§eRefunding escrow %id%...").replace("%id%", refundId));
                 em.refundEscrow(refundId, sender).thenAccept(res -> {
-                    net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                    runSync(() -> {
                         if (res.success) {
                             sender.sendMessage(getMsg("commands.escrow.success-refunded",
                                     "§a§l✔ §aEscrow %id% refunded successfully!").replace("%id%", refundId));
@@ -2701,7 +2932,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 Player player = (Player) sender;
                 sender.sendMessage(getMsg("commands.escrow.fetching", "§eFetching your active escrows..."));
                 em.listEscrows(player).thenAccept(list -> {
-                    net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                    runSync(() -> {
                         if (list.isEmpty()) {
                             sender.sendMessage(getMsg("commands.escrow.empty",
                                     "§e§l[VaultX Escrow] §cYou have no active escrow transactions."));
@@ -2750,8 +2981,10 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
     }
 
     private void handleExchange(CommandSender sender, String[] args) {
-        if (!sender.hasPermission("vault.convert") && !sender.hasPermission("vault.exchange") && !sender.hasPermission("vault.admin")) {
-            sender.sendMessage(getMsg("general.no-permission", "§cYou do not have permission to execute this command!"));
+        if (!sender.hasPermission("vault.convert") && !sender.hasPermission("vault.exchange")
+                && !sender.hasPermission("vault.admin")) {
+            sender.sendMessage(
+                    getMsg("general.no-permission", "§cYou do not have permission to execute this command!"));
             return;
         }
 
@@ -2810,7 +3043,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         final String fromCurrency = args[1];
         final String toCurrency = args[2];
         final double finalAmount = amount;
-        ConversionResult res = net.milkbowl.vault.Vault.getExchangeRateManager().convert(player, fromCurrency, toCurrency, finalAmount);
+        ConversionResult res = net.milkbowl.vault.Vault.getExchangeRateManager().convert(player, fromCurrency,
+                toCurrency, finalAmount);
         if (res != null && res.success) {
             sender.sendMessage(getMsg("commands.exchange.success", "§a§l✔ §aConversion successful: %message%")
                     .replace("%message%", res.message));
@@ -2843,10 +3077,10 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         String sub = args[1].toLowerCase();
         if (sub.equals("list")) {
             sender.sendMessage(getMsg("commands.mailbox.fetching", "§eRécupération de vos messages en attente..."));
-            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+            runAsync(() -> {
                 java.util.List<net.milkbowl.vault.redis.LocalFailoverManager.MailRecord> mails = net.milkbowl.vault.Vault
                         .getMailboxManager().getPendingMail(player.getUniqueId());
-                net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                runSync(() -> {
                     if (mails.isEmpty()) {
                         player.sendMessage(getMsg("commands.mailbox.empty-box",
                                 "§d§l[Mailbox] §cYou have no pending messages."));
@@ -2896,9 +3130,9 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         }
 
         if (sub.equals("invites")) {
-            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+            runAsync(() -> {
                 java.util.Map<String, String> pending = fm.getPendingInvitesForPlayer(player.getUniqueId());
-                net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                runSync(() -> {
                     if (pending.isEmpty()) {
                         sender.sendMessage(
                                 getMsg("bank.invites-empty", "§cYou have no pending bank invitations."));
@@ -2936,38 +3170,42 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             int maxAccounts = plugin.getConfig().getInt("banks.max-accounts-per-player", 3);
 
             if (creationCost > 0 && econ.getBalance(player) < creationCost) {
-                sender.sendMessage(getMsg("bank.creation-insufficient-funds", "§cCreating a bank account costs %cost%. Insufficient funds.")
+                sender.sendMessage(getMsg("bank.creation-insufficient-funds",
+                        "§cCreating a bank account costs %cost%. Insufficient funds.")
                         .replace("%cost%", econ.format(creationCost)));
                 return;
             }
 
-            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+            runAsync(() -> {
                 if (maxAccounts > 0) {
                     java.util.List<String> ownedBanks = fm.getBanksForPlayer(player.getUniqueId());
-                    long ownedCount = ownedBanks.stream().filter(b -> player.getUniqueId().equals(fm.getBankAccountOwner(b))).count();
+                    long ownedCount = ownedBanks.stream()
+                            .filter(b -> player.getUniqueId().equals(fm.getBankAccountOwner(b))).count();
                     if (ownedCount >= maxAccounts) {
-                        net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> sender.sendMessage(
-                                getMsg("bank.max-accounts-exceeded", "§cYou cannot own more than %limit% bank accounts.").replace("%limit%", String.valueOf(maxAccounts))));
+                        runSync(() -> sender.sendMessage(
+                                getMsg("bank.max-accounts-exceeded",
+                                        "§cYou cannot own more than %limit% bank accounts.")
+                                        .replace("%limit%", String.valueOf(maxAccounts))));
                         return;
                     }
                 }
 
                 UUID existingOwner = fm.getBankAccountOwner(bankName);
                 if (existingOwner != null) {
-                    net.milkbowl.vault.util.FoliaScheduler.runSync(plugin,
+                    runSync(
                             () -> sender.sendMessage(
                                     getMsg("bank.already-exists", "§cA bank account with that name already exists.")));
                     return;
                 }
 
                 if (creationCost > 0) {
-                    net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> econ.withdrawPlayer(player, creationCost));
+                    runSync(() -> econ.withdrawPlayer(player, creationCost));
                 }
 
                 fm.createBankAccount(bankName, player.getUniqueId());
                 fm.saveBankBalance(bankName, 0.0);
 
-                net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                runSync(() -> {
                     econ.createBank(bankName, player);
                     sender.sendMessage(getMsg("bank.create-success",
                             "§a§l✔ §aShared bank account §e%name% §asuccessfully created. You are the Owner (OWNER).")
@@ -2978,9 +3216,9 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         }
 
         if (sub.equals("list")) {
-            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+            runAsync(() -> {
                 java.util.List<String> bankNames = fm.getBanksForPlayer(player.getUniqueId());
-                net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                runSync(() -> {
                     if (bankNames.isEmpty()) {
                         sender.sendMessage(
                                 getMsg("bank.no-banks", "§cYou are not part of any shared bank account."));
@@ -3013,10 +3251,10 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         }
         String bankName = args[2].toLowerCase();
 
-        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+        runAsync(() -> {
             UUID owner = fm.getBankAccountOwner(bankName);
             if (owner == null) {
-                net.milkbowl.vault.util.FoliaScheduler.runSync(plugin,
+                runSync(
                         () -> sender.sendMessage(
                                 getMsg("bank.not-found", "§cShared bank account '%name%' does not exist.")
                                         .replace("%name%", bankName)));
@@ -3025,28 +3263,28 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
 
             String userRole = fm.getBankRole(bankName, player.getUniqueId());
             if (userRole == null) {
-                net.milkbowl.vault.util.FoliaScheduler.runSync(plugin,
+                runSync(
                         () -> sender.sendMessage(
                                 getMsg("bank.not-member", "§cYou are not a member of the bank account '%name%'.")
                                         .replace("%name%", bankName)));
                 return;
             }
             if (userRole.startsWith("INVITED_") && !sub.equals("accept") && !sub.equals("deny")) {
-                net.milkbowl.vault.util.FoliaScheduler.runSync(plugin,
+                runSync(
                         () -> sender.sendMessage(getMsg("bank.invited-must-accept",
                                 "§cYou must first accept the invitation to perform this action.")));
                 return;
             }
-            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+            runSync(() -> {
                 if (sub.equals("delete")) {
                     if (!userRole.equals("OWNER")) {
                         sender.sendMessage(getMsg("bank.no-permission-action",
                                 "§cOnly the Owner (OWNER) can delete this bank account."));
                         return;
                     }
-                    net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                    runAsync(() -> {
                         fm.deleteBankAccount(bankName);
-                        net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                        runSync(() -> {
                             econ.deleteBank(bankName);
                             sender.sendMessage(getMsg("bank.delete-success",
                                     "§a§l✔ §aShared bank account §e%name% §ahas been deleted.")
@@ -3056,13 +3294,13 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 } else if (sub.equals("bal") || sub.equals("balance")) {
                     // Fetch balance asynchronously to prevent main-thread block on cache misses
                     sender.sendMessage(getMsg("bank.fetching-balance", "§eRetrieving balance..."));
-                    net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                    runAsync(() -> {
                         double balance = econ.bankBalance(bankName).balance;
                         if (balance == 0 && !econ.bankBalance(bankName).transactionSuccess()) {
                             balance = fm.getBankBalance(bankName);
                         }
                         final double finalBalance = balance;
-                        net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                        runSync(() -> {
                             sender.sendMessage(
                                     getMsg("bank.balance", "§a§l[Bank] §aAccount balance for §e%name%§a: §e%amount%")
                                             .replace("%name%", bankName)
@@ -3104,7 +3342,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                                     .replace("%amount%", econ.format(amount))
                                     .replace("%name%", bankName));
                             // Sync SQLite if not native/handled automatically
-                            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                            runAsync(() -> {
                                 double currentBal = fm.getBankBalance(bankName);
                                 fm.saveBankBalance(bankName, currentBal + amount);
                             });
@@ -3136,14 +3374,14 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                         return;
                     }
 
-                    net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                    runAsync(() -> {
                         double bankBal = econ.bankBalance(bankName).balance;
                         if (bankBal == 0 && !econ.bankBalance(bankName).transactionSuccess()) {
                             bankBal = fm.getBankBalance(bankName);
                         }
 
                         final double finalBankBal = bankBal;
-                        net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                        runSync(() -> {
                             if (finalBankBal < amount) {
                                 sender.sendMessage(getMsg("bank.withdraw-insufficient",
                                         "§cInsufficient bank account balance (%amount% available).")
@@ -3159,7 +3397,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                                             "§a§l✔ §aWithdrew §e%amount% §afrom account §e%name%§a.")
                                             .replace("%amount%", econ.format(amount))
                                             .replace("%name%", bankName));
-                                    net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                                    runAsync(() -> {
                                         double currentBal = fm.getBankBalance(bankName);
                                         fm.saveBankBalance(bankName, Math.max(0, currentBal - amount));
                                     });
@@ -3205,9 +3443,20 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                         return;
                     }
 
-                    net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                    runAsync(() -> {
+                        int maxMembers = plugin.getConfig().getInt("banks.max-members", 20);
+                        Map<UUID, String> currentMembers = fm.getBankMembers(bankName);
+                        // Count only real (non-invited) members
+                        long realCount = currentMembers.values().stream()
+                                .filter(r -> !r.startsWith("INVITED_")).count();
+                        if (realCount >= maxMembers) {
+                            runSync(() -> sender.sendMessage(getMsg("bank.member-limit-reached",
+                                    "§c§l❌ §cThis bank has reached its maximum member limit (§e%max%§c)."
+                                            .replace("%max%", String.valueOf(maxMembers)))));
+                            return;
+                        }
                         fm.addBankMember(bankName, target.getUniqueId(), targetRole);
-                        net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                        runSync(() -> {
                             sender.sendMessage(getMsg("bank.member-added",
                                     "§a§l✔ §aPlayer §e%player% §aadded to account §e%name% §awith role §e%role%&a.")
                                     .replace("%player%", getPlayerNameSafe(target, args[3]))
@@ -3243,30 +3492,30 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                         return;
                     }
 
-                    net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                    runAsync(() -> {
                         String targetRole = fm.getBankRole(bankName, target.getUniqueId());
                         if (targetRole == null) {
-                            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin,
+                            runSync(
                                     () -> sender.sendMessage(getMsg("bank.member-not-found",
                                             "§cThe player is not a member of this bank account.")));
                             return;
                         }
 
                         if (targetRole.equals("OWNER")) {
-                            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> sender
+                            runSync(() -> sender
                                     .sendMessage(getMsg("bank.member-cannot-remove-owner",
                                             "§cThe Owner (OWNER) cannot be removed from the account.")));
                             return;
                         }
                         if (targetRole.equals("MANAGER") && !userRole.equals("OWNER")) {
-                            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> sender.sendMessage(
+                            runSync(() -> sender.sendMessage(
                                     getMsg("bank.member-cannot-remove-manager",
                                             "§cOnly the Owner (OWNER) can remove a Manager (MANAGER).")));
                             return;
                         }
 
                         fm.removeBankMember(bankName, target.getUniqueId());
-                        net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                        runSync(() -> {
                             sender.sendMessage(getMsg("bank.member-removed",
                                     "§a§l✔ §aPlayer §e%player% §aremoved from account §e%name%&a.")
                                     .replace("%player%", getPlayerNameSafe(target, args[3]))
@@ -3306,10 +3555,10 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                         return;
                     }
 
-                    net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                    runAsync(() -> {
                         String currentRole = fm.getBankRole(bankName, target.getUniqueId());
                         if (currentRole != null) {
-                            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                            runSync(() -> {
                                 if (currentRole.startsWith("INVITED_")) {
                                     sender.sendMessage(getMsg("bank.invite-already-pending",
                                             "§cThis player already has a pending invitation for this bank."));
@@ -3331,7 +3580,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                             redis.publishBankMemberUpdate(bankName, target.getUniqueId(), inviteRole);
                         }
 
-                        net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                        runSync(() -> {
                             sender.sendMessage(getMsg("bank.invite-sent",
                                     "§a§l✔ §aInvitation sent to §e%player% §ato join §e%name% §awith role §e%role%&a.")
                                     .replace("%player%", getPlayerNameSafe(target, args[3]))
@@ -3352,7 +3601,17 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                         return;
                     }
                     final String targetRole = userRole.replace("INVITED_", "");
-                    net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                    runAsync(() -> {
+                        int maxMembers = plugin.getConfig().getInt("banks.max-members", 20);
+                        Map<UUID, String> currentMembers = fm.getBankMembers(bankName);
+                        long realCount = currentMembers.values().stream()
+                                .filter(r -> !r.startsWith("INVITED_")).count();
+                        if (realCount >= maxMembers) {
+                            runSync(() -> sender.sendMessage(getMsg("bank.member-limit-reached",
+                                    "§c§l❌ §cThis bank is full and cannot accept more members (max §e%max%§c)."
+                                            .replace("%max%", String.valueOf(maxMembers)))));
+                            return;
+                        }
                         fm.addBankMember(bankName, player.getUniqueId(), targetRole);
                         // Broadcast update
                         net.milkbowl.vault.redis.VaultRedisManager redis = net.milkbowl.vault.redis.VaultRedisManager
@@ -3360,7 +3619,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                         if (redis != null) {
                             redis.publishBankMemberUpdate(bankName, player.getUniqueId(), targetRole);
                         }
-                        net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                        runSync(() -> {
                             sender.sendMessage(getMsg("bank.accept-success",
                                     "§a§l✔ §aYou accepted the invitation to join §e%name% §aas §e%role%&a.")
                                     .replace("%name%", bankName)
@@ -3373,7 +3632,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                                 "§cYou do not have a pending invitation for this bank."));
                         return;
                     }
-                    net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+                    runAsync(() -> {
                         fm.removeBankMember(bankName, player.getUniqueId());
                         // Broadcast update
                         net.milkbowl.vault.redis.VaultRedisManager redis = net.milkbowl.vault.redis.VaultRedisManager
@@ -3381,7 +3640,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                         if (redis != null) {
                             redis.publishBankMemberUpdate(bankName, player.getUniqueId(), "REMOVE");
                         }
-                        net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                        runSync(() -> {
                             sender.sendMessage(getMsg("bank.deny-success",
                                     "§a§l✔ §aYou declined the invitation to join §e%name%&a.")
                                     .replace("%name%", bankName));
@@ -3415,7 +3674,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
 
         if (sub.equals("apply")) {
             if (args.length < 4) {
-                player.sendMessage(getMsg("commands.loan.apply-usage", "§cUsage: /vaultx loan apply <bank_name> <amount>"));
+                player.sendMessage(
+                        getMsg("commands.loan.apply-usage", "§cUsage: /vaultx loan apply <bank_name> <amount>"));
                 return;
             }
             String bankName = args[2].toLowerCase();
@@ -3423,7 +3683,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             try {
                 amount = parsePositiveDouble(args[3]);
             } catch (NumberFormatException e) {
-                player.sendMessage(getMsg("commands.loan.invalid-amount", "§cInvalid amount. It must be a positive number."));
+                player.sendMessage(
+                        getMsg("commands.loan.invalid-amount", "§cInvalid amount. It must be a positive number."));
                 return;
             }
 
@@ -3434,20 +3695,22 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 player.sendMessage(getMsg("commands.loan.manager-uninitialized", "§cThe loan manager is not ready."));
             }
         } else if (sub.equals("list")) {
-            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+            runAsync(() -> {
                 java.util.List<LocalFailoverManager.LoanRecord> loans = fm.getLoansForPlayer(player.getUniqueId());
                 double debt = fm.getPlayerDebt(player.getUniqueId());
 
-                net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                runSync(() -> {
                     if (loans.isEmpty() && debt <= 0.0) {
-                        player.sendMessage(getMsg("commands.loan.empty-loans", "§cYou have no active loans or pending salary garnishments."));
+                        player.sendMessage(getMsg("commands.loan.empty-loans",
+                                "§cYou have no active loans or pending salary garnishments."));
                         return;
                     }
 
                     player.sendMessage(getMsg("commands.loan.list-header", "§b§l=== Your VaultX Loans & Debts ==="));
                     for (LocalFailoverManager.LoanRecord lr : loans) {
                         String statusColor = lr.status.equalsIgnoreCase("ACTIVE") ? "§a" : "§7";
-                        player.sendMessage(getMsg("commands.loan.list-entry", "  §7- ID: §e%id% §7| Bank: §f%bank% §7| Remaining: %color%%remaining% §7| Status: %status%")
+                        player.sendMessage(getMsg("commands.loan.list-entry",
+                                "  §7- ID: §e%id% §7| Bank: §f%bank% §7| Remaining: %color%%remaining% §7| Status: %status%")
                                 .replace("%id%", lr.id)
                                 .replace("%bank%", lr.bankName.toUpperCase())
                                 .replace("%color%", statusColor)
@@ -3455,10 +3718,12 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                                 .replace("%status%", lr.status));
                     }
                     if (debt > 0.0) {
-                        player.sendMessage(getMsg("commands.loan.list-debt", "  §c- Pending salary garnishments: §e%debt%")
-                                .replace("%debt%", econ.format(debt)));
+                        player.sendMessage(
+                                getMsg("commands.loan.list-debt", "  §c- Pending salary garnishments: §e%debt%")
+                                        .replace("%debt%", econ.format(debt)));
                     }
-                    player.sendMessage(getMsg("commands.loan.list-footer", "§b§l======================================"));
+                    player.sendMessage(
+                            getMsg("commands.loan.list-footer", "§b§l======================================"));
                 });
             });
         } else if (sub.equals("info")) {
@@ -3467,7 +3732,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 return;
             }
             String loanId = args[2];
-            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+            runAsync(() -> {
                 java.util.List<LocalFailoverManager.LoanRecord> loans = fm.getLoansForPlayer(player.getUniqueId());
                 LocalFailoverManager.LoanRecord record = null;
                 for (LocalFailoverManager.LoanRecord lr : loans) {
@@ -3478,7 +3743,7 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 }
 
                 final LocalFailoverManager.LoanRecord finalRec = record;
-                net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                runSync(() -> {
                     if (finalRec == null) {
                         player.sendMessage(getMsg("commands.loan.loan-not-found", "§cLoan not found."));
                         return;
@@ -3496,14 +3761,19 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                     player.sendMessage(getMsg("commands.loan.info-interest", "  §fInterest Rate: §e%rate%%")
                             .replace("%rate%", String.valueOf(finalRec.interestRate * 100.0)));
                     player.sendMessage(getMsg("commands.loan.info-next", "  §fNext Due Date: §e%next%")
-                            .replace("%next%", finalRec.status.equalsIgnoreCase("ACTIVE") ? sdf.format(new Date(finalRec.nextBilling)) : "Expired/Paid"));
+                            .replace("%next%",
+                                    finalRec.status.equalsIgnoreCase("ACTIVE")
+                                            ? sdf.format(new Date(finalRec.nextBilling))
+                                            : "Expired/Paid"));
                     player.sendMessage(getMsg("commands.loan.info-status", "  §fStatus: §e%status%")
                             .replace("%status%", finalRec.status));
-                    player.sendMessage(getMsg("commands.loan.info-footer", "§b§l======================================="));
+                    player.sendMessage(
+                            getMsg("commands.loan.info-footer", "§b§l======================================="));
                 });
             });
         } else {
-            player.sendMessage(getMsg("commands.loan.unknown-subcommand", "§cUnknown subcommand. Choices: apply, list, info"));
+            player.sendMessage(
+                    getMsg("commands.loan.unknown-subcommand", "§cUnknown subcommand. Choices: apply, list, info"));
         }
     }
 
@@ -3539,27 +3809,30 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         }
 
         net.milkbowl.vault.economy.PaydayManager.PaydayBreakdown breakdown = pm.getPlayerBreakdown(player);
-        
+
         long remainingMs = breakdown.nextPaydayTime - System.currentTimeMillis();
         long diffSeconds = Math.max(0, remainingMs / 1000 % 60);
         long diffMinutes = Math.max(0, remainingMs / (60 * 1000) % 60);
         long diffHours = Math.max(0, remainingMs / (60 * 60 * 1000));
-        
+
         String timeStr = String.format("%02dh %02dm %02ds", diffHours, diffMinutes, diffSeconds);
         if (diffHours == 0) {
             timeStr = String.format("%02dm %02ds", diffMinutes, diffSeconds);
         }
 
         Economy econ = getEconomy();
-        String grossStr = econ != null ? econ.format(breakdown.grossAmount) : String.format("%.2f", breakdown.grossAmount);
+        String grossStr = econ != null ? econ.format(breakdown.grossAmount)
+                : String.format("%.2f", breakdown.grossAmount);
         String taxStr = econ != null ? econ.format(breakdown.taxAmount) : String.format("%.2f", breakdown.taxAmount);
-        String garnishStr = econ != null ? econ.format(breakdown.garnishedAmount) : String.format("%.2f", breakdown.garnishedAmount);
+        String garnishStr = econ != null ? econ.format(breakdown.garnishedAmount)
+                : String.format("%.2f", breakdown.garnishedAmount);
         String netStr = econ != null ? econ.format(breakdown.netAmount) : String.format("%.2f", breakdown.netAmount);
         String remainingDebtStr = econ != null ? econ.format(breakdown.debt) : String.format("%.2f", breakdown.debt);
 
         player.sendMessage(getMsg("payday.info-header", "§b§l=== Your Salary & Payday Details ==="));
         player.sendMessage(getMsg("payday.info-next", "  §fNext payday in: §e%time%").replace("%time%", timeStr));
-        player.sendMessage(getMsg("payday.info-group", "  §fSalary Group: §e%group%").replace("%group%", breakdown.group.toUpperCase()));
+        player.sendMessage(getMsg("payday.info-group", "  §fSalary Group: §e%group%").replace("%group%",
+                breakdown.group.toUpperCase()));
         player.sendMessage(getMsg("payday.info-gross", "  §fGross Salary: §e%gross%").replace("%gross%", grossStr));
         if (breakdown.taxAmount > 0.0) {
             player.sendMessage(getMsg("payday.info-tax", "  §fIncome Tax: §c-%amount% §7(%percent%%)")
@@ -3567,31 +3840,38 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                     .replace("%percent%", String.format("%.1f", breakdown.taxPercent)));
         }
         if (breakdown.garnishedAmount > 0.0) {
-            player.sendMessage(getMsg("payday.info-garnishment", "  §fDebt Garnishment: §c-%amount% §7(Remaining: %remaining%)")
-                    .replace("%amount%", garnishStr)
-                    .replace("%remaining%", remainingDebtStr));
+            player.sendMessage(
+                    getMsg("payday.info-garnishment", "  §fDebt Garnishment: §c-%amount% §7(Remaining: %remaining%)")
+                            .replace("%amount%", garnishStr)
+                            .replace("%remaining%", remainingDebtStr));
         }
-        player.sendMessage(getMsg("payday.info-net", "  §fEstimated Net Payout: §a%amount%").replace("%amount%", netStr));
+        player.sendMessage(
+                getMsg("payday.info-net", "  §fEstimated Net Payout: §a%amount%").replace("%amount%", netStr));
         player.sendMessage(getMsg("payday.info-footer", "§b§l======================================"));
     }
 
     private void handleDynamicPricing(CommandSender sender, Economy econ, String[] args) {
         if (!sender.hasPermission("vault.admin")) {
-            sender.sendMessage(getMsg("commands.admin.no-permission", "§cYou do not have permission to execute admin commands."));
+            sender.sendMessage(
+                    getMsg("commands.admin.no-permission", "§cYou do not have permission to execute admin commands."));
             return;
         }
 
-        net.milkbowl.vault.economy.DynamicPricingManager dpManager = net.milkbowl.vault.Vault.getDynamicPricingManager();
+        net.milkbowl.vault.economy.DynamicPricingManager dpManager = net.milkbowl.vault.Vault
+                .getDynamicPricingManager();
         if (dpManager == null) {
-            sender.sendMessage(getMsg("commands.dynamicpricing.not-active", "§c[VaultX] Dynamic Pricing system is not active."));
+            sender.sendMessage(
+                    getMsg("commands.dynamicpricing.not-active", "§c[VaultX] Dynamic Pricing system is not active."));
             return;
         }
 
         if (args.length <= 1 || args[1].equalsIgnoreCase("info") || args[1].equalsIgnoreCase("status")) {
-            sender.sendMessage(getMsg("commands.dynamicpricing.header", "§6━━━━━ §e⚡ VaultX Dynamic Pricing Engine §6━━━━━"));
+            sender.sendMessage(
+                    getMsg("commands.dynamicpricing.header", "§6━━━━━ §e⚡ VaultX Dynamic Pricing Engine §6━━━━━"));
             sender.sendMessage("§7Status: " + (dpManager.isEnabled() ? "§aEnabled" : "§cDisabled"));
             sender.sendMessage("§7Elasticity Factor: §e" + dpManager.getElasticity());
-            sender.sendMessage("§7Multiplier Bounds: §e" + dpManager.getMinMultiplier() + "x §7- §e" + dpManager.getMaxMultiplier() + "x");
+            sender.sendMessage("§7Multiplier Bounds: §e" + dpManager.getMinMultiplier() + "x §7- §e"
+                    + dpManager.getMaxMultiplier() + "x");
             sender.sendMessage("§7Invert Sell Prices: §e" + dpManager.isInvertSellPrices());
 
             List<String> currencies = getCurrencies(econ);
@@ -3604,9 +3884,12 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 String pctStr = String.format(java.util.Locale.US, "%+.1f%%", pct);
 
                 sender.sendMessage("§8 » §f" + currency.toUpperCase() + ":");
-                sender.sendMessage("§7   Current Money Supply: §e" + (econ != null ? econ.format(currentSupply) : String.format(java.util.Locale.US, "%.2f", currentSupply)));
-                sender.sendMessage("§7   Baseline Money Supply: §e" + (econ != null ? econ.format(baselineSupply) : String.format(java.util.Locale.US, "%.2f", baselineSupply)));
-                sender.sendMessage("§7   Inflation Index: §b" + String.format(java.util.Locale.US, "%.2fx", multiplier) + " §8(" + (pct >= 0 ? "§c" : "§a") + pctStr + "§8)");
+                sender.sendMessage("§7   Current Money Supply: §e" + (econ != null ? econ.format(currentSupply)
+                        : String.format(java.util.Locale.US, "%.2f", currentSupply)));
+                sender.sendMessage("§7   Baseline Money Supply: §e" + (econ != null ? econ.format(baselineSupply)
+                        : String.format(java.util.Locale.US, "%.2f", baselineSupply)));
+                sender.sendMessage("§7   Inflation Index: §b" + String.format(java.util.Locale.US, "%.2fx", multiplier)
+                        + " §8(" + (pct >= 0 ? "§c" : "§a") + pctStr + "§8)");
             }
             sender.sendMessage("§6━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             return;
@@ -3615,13 +3898,15 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         String sub = args[1].toLowerCase();
         if (sub.equals("recalculate") || sub.equals("recalc") || sub.equals("refresh")) {
             dpManager.recalculateAllAsync();
-            sender.sendMessage(getMsg("commands.dynamicpricing.recalc-triggered", "§a[VaultX] Dynamic pricing money supply recalculation triggered asynchronously."));
+            sender.sendMessage(getMsg("commands.dynamicpricing.recalc-triggered",
+                    "§a[VaultX] Dynamic pricing money supply recalculation triggered asynchronously."));
             return;
         }
 
         if (sub.equals("setbase") || sub.equals("setbaseline")) {
             if (args.length < 3) {
-                sender.sendMessage(getMsg("commands.dynamicpricing.setbase-usage", "§cUsage: /vaultx dp setbase <amount> [currency]"));
+                sender.sendMessage(getMsg("commands.dynamicpricing.setbase-usage",
+                        "§cUsage: /vaultx dp setbase <amount> [currency]"));
                 return;
             }
             try {
@@ -3629,7 +3914,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 String currency = args.length >= 4 ? args[3].toLowerCase() : "default";
                 dpManager.setBaselineMoneySupply(currency, amount);
                 String formatted = econ != null ? econ.format(amount) : String.valueOf(amount);
-                sender.sendMessage(getMsg("commands.dynamicpricing.setbase-success", "§a[VaultX] Baseline money supply for §e%currency% §aset to §e%amount%§a.")
+                sender.sendMessage(getMsg("commands.dynamicpricing.setbase-success",
+                        "§a[VaultX] Baseline money supply for §e%currency% §aset to §e%amount%§a.")
                         .replace("%currency%", currency)
                         .replace("%amount%", formatted));
             } catch (NumberFormatException e) {
@@ -3640,7 +3926,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
 
         if (sub.equals("calc") || sub.equals("calculate") || sub.equals("test")) {
             if (args.length < 3) {
-                sender.sendMessage(getMsg("commands.dynamicpricing.calc-usage", "§cUsage: /vaultx dp calc <basePrice> [currency]"));
+                sender.sendMessage(getMsg("commands.dynamicpricing.calc-usage",
+                        "§cUsage: /vaultx dp calc <basePrice> [currency]"));
                 return;
             }
             try {
@@ -3650,22 +3937,27 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
                 double adjustedSell = dpManager.getAdjustedSellPrice(currency, basePrice);
                 double mult = dpManager.getInflationMultiplier(currency);
 
-                sender.sendMessage("§6[VaultX Dynamic Pricing Simulation] §f(" + currency.toUpperCase() + " @ " + String.format(java.util.Locale.US, "%.2fx", mult) + "):");
+                sender.sendMessage("§6[VaultX Dynamic Pricing Simulation] §f(" + currency.toUpperCase() + " @ "
+                        + String.format(java.util.Locale.US, "%.2fx", mult) + "):");
                 sender.sendMessage("§7  Base Price: §e" + (econ != null ? econ.format(basePrice) : basePrice));
-                sender.sendMessage("§7  Adjusted Buy Price: §a" + (econ != null ? econ.format(adjustedBuy) : adjustedBuy));
-                sender.sendMessage("§7  Adjusted Sell Price: §c" + (econ != null ? econ.format(adjustedSell) : adjustedSell));
+                sender.sendMessage(
+                        "§7  Adjusted Buy Price: §a" + (econ != null ? econ.format(adjustedBuy) : adjustedBuy));
+                sender.sendMessage(
+                        "§7  Adjusted Sell Price: §c" + (econ != null ? econ.format(adjustedSell) : adjustedSell));
             } catch (NumberFormatException e) {
                 sender.sendMessage(getMsg("commands.dynamicpricing.invalid-amount", "§cInvalid base price specified."));
             }
             return;
         }
 
-        sender.sendMessage(getMsg("commands.dynamicpricing.unknown-subcommand", "§cUnknown subcommand. Use: /vx dp [info|recalculate|setbase|calc]"));
+        sender.sendMessage(getMsg("commands.dynamicpricing.unknown-subcommand",
+                "§cUnknown subcommand. Use: /vx dp [info|recalculate|setbase|calc]"));
     }
 
     private void handleBlackMarket(CommandSender sender, String[] args) {
         if (!plugin.getConfig().getBoolean("blackmarket.enabled", true)) {
-            sender.sendMessage(getMsg("blackmarket.disabled", "§cThe Black Market is currently disabled on this server."));
+            sender.sendMessage(
+                    getMsg("blackmarket.disabled", "§cThe Black Market is currently disabled on this server."));
             return;
         }
         if (!(sender instanceof Player)) {
@@ -3687,17 +3979,27 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             }
             net.milkbowl.vault.economy.BlackMarketManager bm = Vault.getBlackMarketManager();
             if (bm != null) {
-                net.milkbowl.vault.economy.BlackMarketManager.LaunderingResult res = bm.launder(player, amount, getEconomy());
+                net.milkbowl.vault.economy.BlackMarketManager.LaunderingResult res = bm.launder(player, amount,
+                        getEconomy());
                 if (!res.isSuccess()) {
-                    player.sendMessage(getMsg("blackmarket.insufficient-dirty", "§cYou do not have enough dirty money to launder that amount!"));
+                    player.sendMessage(getMsg("blackmarket.insufficient-dirty",
+                            "§cYou do not have enough dirty money to launder that amount!"));
                 } else if (res.isSeized()) {
-                    player.sendMessage(getMsg("blackmarket.launder-seized", "§c&l🚨 [POLICE RAID] §cPolice intercepted your transaction! §c%seized% §cof dirty money was confiscated!")
-                            .replace("%seized%", getEconomy() != null ? getEconomy().format(res.getDirtyLaundered()) : String.valueOf(res.getDirtyLaundered())));
+                    player.sendMessage(getMsg("blackmarket.launder-seized",
+                            "§c&l🚨 [POLICE RAID] §cPolice intercepted your transaction! §c%seized% §cof dirty money was confiscated!")
+                            .replace("%seized%", getEconomy() != null ? getEconomy().format(res.getDirtyLaundered())
+                                    : String.valueOf(res.getDirtyLaundered())));
                 } else {
-                    player.sendMessage(getMsg("blackmarket.launder-success", "§a&l✔ [Black Market] §aSuccessfully laundered §c%dirty% §aof dirty money! Deposited §a%clean% §aclean cash into your account (Fee: §e%fee%§a).")
-                            .replace("%dirty%", getEconomy() != null ? getEconomy().format(res.getDirtyLaundered()) : String.valueOf(res.getDirtyLaundered()))
-                            .replace("%clean%", getEconomy() != null ? getEconomy().format(res.getCleanReceived()) : String.valueOf(res.getCleanReceived()))
-                            .replace("%fee%", getEconomy() != null ? getEconomy().format(res.getFeePaid()) : String.valueOf(res.getFeePaid())));
+                    player.sendMessage(getMsg("blackmarket.launder-success",
+                            "§a&l✔ [Black Market] §aSuccessfully laundered §c%dirty% §aof dirty money! Deposited §a%clean% §aclean cash into your account (Fee: §e%fee%§a).")
+                            .replace("%dirty%",
+                                    getEconomy() != null ? getEconomy().format(res.getDirtyLaundered())
+                                            : String.valueOf(res.getDirtyLaundered()))
+                            .replace("%clean%",
+                                    getEconomy() != null ? getEconomy().format(res.getCleanReceived())
+                                            : String.valueOf(res.getCleanReceived()))
+                            .replace("%fee%", getEconomy() != null ? getEconomy().format(res.getFeePaid())
+                                    : String.valueOf(res.getFeePaid())));
                 }
             }
             return;
@@ -3710,7 +4012,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
 
     private void handleDirty(CommandSender sender, String[] args) {
         net.milkbowl.vault.economy.BlackMarketManager bm = Vault.getBlackMarketManager();
-        if (bm == null) return;
+        if (bm == null)
+            return;
 
         if (args.length < 2 || args[1].equalsIgnoreCase("balance")) {
             if (!(sender instanceof Player)) {
@@ -3719,7 +4022,8 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             }
             Player player = (Player) sender;
             double bal = bm.getDirtyBalance(player);
-            player.sendMessage(getMsg("blackmarket.dirty-balance", "§c§l[Dirty Money] §fYou currently hold §c%amount% §fof dirty money.")
+            player.sendMessage(getMsg("blackmarket.dirty-balance",
+                    "§c§l[Dirty Money] §fYou currently hold §c%amount% §fof dirty money.")
                     .replace("%amount%", getEconomy() != null ? getEconomy().format(bal) : String.valueOf(bal)));
             return;
         }
@@ -3748,13 +4052,17 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
 
             if (args[1].equalsIgnoreCase("give")) {
                 bm.depositDirty(target.getPlayer(), amount);
-                sender.sendMessage(getMsg("blackmarket.give-success", "§a&l[Black Market] §fGave §c%amount% §fof dirty money to §e%player%§f.")
-                        .replace("%amount%", getEconomy() != null ? getEconomy().format(amount) : String.valueOf(amount))
+                sender.sendMessage(getMsg("blackmarket.give-success",
+                        "§a&l[Black Market] §fGave §c%amount% §fof dirty money to §e%player%§f.")
+                        .replace("%amount%",
+                                getEconomy() != null ? getEconomy().format(amount) : String.valueOf(amount))
                         .replace("%player%", target.getName()));
             } else {
                 bm.withdrawDirty(target.getPlayer(), amount);
-                sender.sendMessage(getMsg("blackmarket.take-success", "§a&l[Black Market] §fRemoved §c%amount% §fof dirty money from §e%player%§f.")
-                        .replace("%amount%", getEconomy() != null ? getEconomy().format(amount) : String.valueOf(amount))
+                sender.sendMessage(getMsg("blackmarket.take-success",
+                        "§a&l[Black Market] §fRemoved §c%amount% §fof dirty money from §e%player%§f.")
+                        .replace("%amount%",
+                                getEconomy() != null ? getEconomy().format(amount) : String.valueOf(amount))
                         .replace("%player%", target.getName()));
             }
         }
@@ -3774,21 +4082,25 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
 
         if (args.length >= 2 && args[1].equalsIgnoreCase("status")) {
             if (dm.isLinked(player.getUniqueId())) {
-                player.sendMessage(getMsg("discord.already-linked", "§a&l[Discord] §fYour account is linked to tag: §e%tag%")
-                        .replace("%tag%", dm.getLinkedDiscordTag(player.getUniqueId())));
+                player.sendMessage(
+                        getMsg("discord.already-linked", "§a&l[Discord] §fYour account is linked to tag: §e%tag%")
+                                .replace("%tag%", dm.getLinkedDiscordTag(player.getUniqueId())));
             } else {
-                player.sendMessage(getMsg("discord.not-linked", "§cYour account is not linked to Discord yet. Use /vx discord link."));
+                player.sendMessage(getMsg("discord.not-linked",
+                        "§cYour account is not linked to Discord yet. Use /vx discord link."));
             }
             return;
         }
 
         String code = dm.generateLinkCode(player.getUniqueId());
         if (code == null) {
-            player.sendMessage(getMsg("discord.link-code-ratelimit", "§c[Discord] §fVeuillez attendre 1 minute avant de générer un nouveau code."));
+            player.sendMessage(getMsg("discord.link-code-ratelimit",
+                    "§c[Discord] §fVeuillez attendre 1 minute avant de générer un nouveau code."));
             return;
         }
         long expire = plugin.getConfig().getLong("discord.account-linking.link-code-expire-minutes", 10);
-        player.sendMessage(getMsg("discord.link-code-generated", "§a§l[Discord] §fVotre code de vérification est : §e§l%code% §7(expire dans %expire% minutes).")
+        player.sendMessage(getMsg("discord.link-code-generated",
+                "§a§l[Discord] §fVotre code de vérification est : §e§l%code% §7(expire dans %expire% minutes).")
                 .replace("%code%", code)
                 .replace("%expire%", String.valueOf(expire)));
     }
@@ -3825,20 +4137,32 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
         String currency = args[1];
         double mult;
         try {
-            mult = Double.parseDouble(args[2]);
+            mult = parsePositiveDouble(args[2]);
         } catch (Exception e) {
-            sender.sendMessage("§cInvalid multiplier!");
+            sender.sendMessage("§cInvalid multiplier! Must be a positive number.");
             return;
         }
         long durationMs = 3600000L;
         String durStr = args[3].toLowerCase();
-        if (durStr.endsWith("m")) durationMs = Long.parseLong(durStr.replace("m", "")) * 60000L;
-        else if (durStr.endsWith("h")) durationMs = Long.parseLong(durStr.replace("h", "")) * 3600000L;
-        else if (durStr.endsWith("s")) durationMs = Long.parseLong(durStr.replace("s", "")) * 1000L;
-        else durationMs = Long.parseLong(durStr);
+        try {
+            if (durStr.endsWith("m"))
+                durationMs = Long.parseLong(durStr.replace("m", "")) * 60000L;
+            else if (durStr.endsWith("h"))
+                durationMs = Long.parseLong(durStr.replace("h", "")) * 3600000L;
+            else if (durStr.endsWith("s"))
+                durationMs = Long.parseLong(durStr.replace("s", "")) * 1000L;
+            else
+                durationMs = Long.parseLong(durStr);
+            if (durationMs <= 0)
+                throw new NumberFormatException("Non-positive duration");
+        } catch (Exception e) {
+            sender.sendMessage("§cInvalid duration format! Use e.g. 1h, 30m, 60s, or milliseconds.");
+            return;
+        }
 
         Vault.getBoosterAPI().registerGlobalBooster(currency, mult, durationMs);
-        Bukkit.broadcastMessage("§a§l🚀 EVENT BOOSTER §f" + mult + "x multiplier activated for §e" + currency.toUpperCase() + "§f!");
+        Bukkit.broadcastMessage(
+                "§a§l🚀 EVENT BOOSTER §f" + mult + "x multiplier activated for §e" + currency.toUpperCase() + "§f!");
     }
 
     private void handleAuditLogCommand(CommandSender sender, String[] args) {
@@ -3850,19 +4174,38 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage("§cUsage: /vaultx audit <player> [limit]");
             return;
         }
-        OfflinePlayer target = Bukkit.getOfflinePlayer(args[1]);
-        int limit = args.length > 2 ? Integer.parseInt(args[2]) : 15;
-        Vault.getAuditAPI().getPlayerTransactionHistoryAsync(target, limit).thenAccept(logs -> {
-            sender.sendMessage("§8§m--------------------------------------------------");
-            sender.sendMessage("§6§l🔍 VaultX Audit Log §7(" + target.getName() + ")");
-            if (logs.isEmpty()) {
-                sender.sendMessage("§7No transaction logs found.");
-            } else {
-                for (var log : logs) {
-                    sender.sendMessage("§8[" + new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date(log.timestamp())) + "] §7" + log.type() + " §a" + log.amount() + " " + log.currency() + " §7(" + log.callerPlugin() + ")");
-                }
+        OfflinePlayer target = resolvePlayerFast(args[1]);
+        if (target == null || (target.getName() == null && !target.hasPlayedBefore())) {
+            sender.sendMessage("§cPlayer '" + args[1] + "' not found.");
+            return;
+        }
+        int limit = 15;
+        if (args.length > 2) {
+            try {
+                limit = Integer.parseInt(args[2]);
+                if (limit <= 0)
+                    limit = 15;
+            } catch (NumberFormatException e) {
+                sender.sendMessage("§cInvalid limit number!");
+                return;
             }
-            sender.sendMessage("§8§m--------------------------------------------------");
+        }
+        Vault.getAuditAPI().getPlayerTransactionHistoryAsync(target, limit).thenAccept(logs -> {
+            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                sender.sendMessage("§8§m--------------------------------------------------");
+                sender.sendMessage("§6§l🔍 VaultX Audit Log §7(" + target.getName() + ")");
+                if (logs.isEmpty()) {
+                    sender.sendMessage("§7No transaction logs found.");
+                } else {
+                    for (var log : logs) {
+                        sender.sendMessage("§8["
+                                + new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date(log.timestamp()))
+                                + "] §7" + log.type() + " §a" + log.amount() + " " + log.currency() + " §7("
+                                + log.callerPlugin() + ")");
+                    }
+                }
+                sender.sendMessage("§8§m--------------------------------------------------");
+            });
         });
     }
 
@@ -3875,18 +4218,287 @@ public class VaultXCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage("§cUsage: /vaultx payoffline <player> <currency> <amount> [reason]");
             return;
         }
-        OfflinePlayer target = Bukkit.getOfflinePlayer(args[1]);
+        OfflinePlayer target = resolvePlayerFast(args[1]);
+        if (target == null || (target.getName() == null && !target.hasPlayedBefore())) {
+            sender.sendMessage("§cPlayer not found: " + args[1]);
+            return;
+        }
         String currency = args[2];
-        double amount = Double.parseDouble(args[3]);
-        String reason = args.length > 4 ? String.join(" ", java.util.Arrays.copyOfRange(args, 4, args.length)) : "Admin Payout";
+        double amount;
+        try {
+            amount = parsePositiveDouble(args[3]);
+        } catch (Exception e) {
+            sender.sendMessage("§cInvalid amount! Must be a positive number.");
+            return;
+        }
+        String reason = args.length > 4 ? String.join(" ", java.util.Arrays.copyOfRange(args, 4, args.length))
+                : "Admin Payout";
 
         Vault.getMailboxAPI().sendOfflinePaymentAsync(target, currency, amount, reason).thenAccept(success -> {
-            if (success) {
-                sender.sendMessage("§aSuccessfully sent offline payment of " + amount + " " + currency + " to " + target.getName() + "!");
-            } else {
-                sender.sendMessage("§cFailed to send offline payment.");
-            }
+            net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
+                if (success) {
+                    sender.sendMessage("§aSuccessfully sent offline payment of " + amount + " " + currency + " to "
+                            + target.getName() + "!");
+                } else {
+                    sender.sendMessage("§cFailed to send offline payment.");
+                }
+            });
         });
     }
-}
 
+    private void handleCrypto(CommandSender sender, String[] args) {
+        if (Vault.getCryptoManager() == null) {
+            sender.sendMessage("§cCrypto feature is not initialized.");
+            return;
+        }
+        if (args.length < 2) {
+            sender.sendMessage("§cUsage: /vaultx crypto <wallet|mine|transfer> ...");
+            return;
+        }
+        String sub = args[1].toLowerCase();
+        if (sub.equals("wallet")) {
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage("§cOnly players can view wallets.");
+                return;
+            }
+            String crypto = args.length > 2 ? args[2] : "BTC";
+            Vault.getCryptoManager().getWalletAsync(player, crypto, java.util.concurrent.ForkJoinPool.commonPool())
+                    .thenAccept(wallet -> {
+                        runSync(() -> sender.sendMessage("§aWallet Address: §f" + wallet.walletAddress()
+                                + " §7| Balance: §e" + wallet.balance() + " " + wallet.cryptoName()));
+                    });
+        } else if (sub.equals("mine")) {
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage("§cOnly players can mine crypto.");
+                return;
+            }
+            String crypto = args.length > 2 ? args[2] : "BTC";
+            double amount = args.length > 3 ? Double.parseDouble(args[3]) : 1.0;
+            Vault.getCryptoManager()
+                    .mineTokensAsync(player, crypto, amount, java.util.concurrent.ForkJoinPool.commonPool())
+                    .thenAccept(res -> {
+                        runSync(() -> sender.sendMessage(
+                                res.transactionSuccess() ? "§a" + res.errorMessage : "§c" + res.errorMessage));
+                    });
+        } else if (sub.equals("transfer")) {
+            if (args.length < 5) {
+                sender.sendMessage("§cUsage: /vaultx crypto transfer <fromAddress> <toAddress> <crypto> <amount>");
+                return;
+            }
+            String from = args[2];
+            String to = args[3];
+            String crypto = args[4];
+            double amount = Double.parseDouble(args[5]);
+            Vault.getCryptoManager()
+                    .transferCryptoAsync(from, to, crypto, amount, java.util.concurrent.ForkJoinPool.commonPool())
+                    .thenAccept(success -> {
+                        runSync(() -> sender.sendMessage(success ? "§aCrypto transfer successful!"
+                                : "§cCrypto transfer failed. Check address or balance."));
+                    });
+        }
+    }
+
+    private void handleCredit(CommandSender sender, String[] args) {
+        if (Vault.getCreditManager() == null) {
+            sender.sendMessage("§cCredit feature is not initialized.");
+            return;
+        }
+        if (args.length < 2) {
+            sender.sendMessage("§cUsage: /vaultx credit <score|limit> ...");
+            return;
+        }
+        String sub = args[1].toLowerCase();
+        if (sub.equals("score")) {
+            OfflinePlayer target = (args.length > 2) ? resolvePlayerFast(args[2])
+                    : (sender instanceof Player ? (Player) sender : null);
+            if (target == null) {
+                sender.sendMessage("§cPlayer not found.");
+                return;
+            }
+            Vault.getCreditManager().updateCreditScoreAsync(target, p -> {
+                Economy econ = getEconomy();
+                return econ != null ? econ.getBalance(p) : 0.0;
+            }, java.util.concurrent.ForkJoinPool.commonPool()).thenAccept(score -> {
+                runSync(() -> sender.sendMessage("§aCredit Score for " + target.getName() + ": §e" + score));
+            });
+        } else if (sub.equals("limit")) {
+            if (!sender.hasPermission("vault.admin")) {
+                sender.sendMessage("§cYou do not have permission.");
+                return;
+            }
+            if (args.length < 5) {
+                sender.sendMessage("§cUsage: /vaultx credit limit <player> <currency> <limit>");
+                return;
+            }
+            OfflinePlayer target = resolvePlayerFast(args[2]);
+            String curr = args[3];
+            double limit = Double.parseDouble(args[4]);
+            Vault.getCreditManager()
+                    .setOverdraftLimitAsync(target, curr, limit, java.util.concurrent.ForkJoinPool.commonPool())
+                    .thenAccept(res -> {
+                        runSync(() -> sender.sendMessage(
+                                res.transactionSuccess() ? "§a" + res.errorMessage : "§c" + res.errorMessage));
+                    });
+        }
+    }
+
+    private void handleStaking(CommandSender sender, Economy econ, String[] args) {
+        if (Vault.getStakingManager() == null) {
+            sender.sendMessage("§cStaking feature is not initialized.");
+            return;
+        }
+        if (args.length < 2) {
+            sender.sendMessage("§cUsage: /vaultx staking <create|claim|list> ...");
+            return;
+        }
+        String sub = args[1].toLowerCase();
+        if (sub.equals("create")) {
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage("§cOnly players can create stakes.");
+                return;
+            }
+            if (args.length < 5) {
+                sender.sendMessage("§cUsage: /vaultx staking create <currency> <amount> <durationDays>");
+                return;
+            }
+            String curr = args[2];
+            double amount = Double.parseDouble(args[3]);
+            int days = Integer.parseInt(args[4]);
+            Vault.getStakingManager().createStakeAsync(player, curr, amount, days,
+                    (p, c) -> (econ instanceof MultiCurrencyEconomy m) ? m.getCurrencyBalance(p, c)
+                            : (c.equalsIgnoreCase("default") ? econ.getBalance(p) : 0.0),
+                    (p, c, a) -> (econ instanceof MultiCurrencyEconomy m) ? m.withdrawCurrencyPlayer(p, c, a)
+                            : (c.equalsIgnoreCase("default") ? econ.withdrawPlayer(p, a)
+                                    : new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Not supported")),
+                    java.util.concurrent.ForkJoinPool.commonPool()).thenAccept(res -> {
+                        runSync(() -> sender.sendMessage(
+                                res.transactionSuccess() ? "§a" + res.errorMessage : "§c" + res.errorMessage));
+                    });
+        } else if (sub.equals("claim")) {
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage("§cOnly players can claim stakes.");
+                return;
+            }
+            if (args.length < 3) {
+                sender.sendMessage("§cUsage: /vaultx staking claim <depositId>");
+                return;
+            }
+            String depositId = args[2];
+            Vault.getStakingManager().claimStakeAsync(player, depositId,
+                    (p, c, a) -> (econ instanceof MultiCurrencyEconomy m) ? m.depositCurrencyPlayer(p, c, a)
+                            : (c.equalsIgnoreCase("default") ? econ.depositPlayer(p, a)
+                                    : new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Not supported")),
+                    java.util.concurrent.ForkJoinPool.commonPool()).thenAccept(res -> {
+                        runSync(() -> sender
+                                .sendMessage(res.transactionSuccess() ? "§aStake claimed!" : "§c" + res.errorMessage));
+                    });
+        } else if (sub.equals("list")) {
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage("§cOnly players can list stakes.");
+                return;
+            }
+            Vault.getStakingManager().getActiveStakesAsync(player, java.util.concurrent.ForkJoinPool.commonPool())
+                    .thenAccept(stakes -> {
+                        runSync(() -> {
+                            sender.sendMessage("§e=== Your Active Stakes ===");
+                            for (var s : stakes) {
+                                sender.sendMessage("§7" + s.depositId() + " §8| §a" + s.principal() + " " + s.currency()
+                                        + " §8| Rate: " + s.interestRate());
+                            }
+                        });
+                    });
+        }
+    }
+
+    private void handleAuction(CommandSender sender, Economy econ, String[] args) {
+        if (Vault.getAuctionManager() == null) {
+            sender.sendMessage("§cAuction feature is not initialized.");
+            return;
+        }
+        if (args.length < 2) {
+            sender.sendMessage("§cUsage: /vaultx auction <create|bid|cancel|list> ...");
+            return;
+        }
+        String sub = args[1].toLowerCase();
+        if (sub.equals("create")) {
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage("§cOnly players can create auctions.");
+                return;
+            }
+            if (args.length < 4) {
+                sender.sendMessage("§cUsage: /vaultx auction create <startingPrice> <durationMinutes> [currency]");
+                return;
+            }
+            double price = Double.parseDouble(args[2]);
+            long minutes = Long.parseLong(args[3]);
+            String curr = args.length > 4 ? args[4] : "default";
+            var item = player.getInventory().getItemInHand();
+            if (item == null || item.getType() == org.bukkit.Material.AIR) {
+                sender.sendMessage("§cHold an item in your main hand to list in auction.");
+                return;
+            }
+            Vault.getAuctionManager().createAuctionAsync(player, item, curr, price, minutes,
+                    java.util.concurrent.ForkJoinPool.commonPool()).thenAccept(listing -> {
+                        runSync(() -> {
+                            if (listing != null) {
+                                player.getInventory().setItemInHand(null);
+                                sender.sendMessage("§aAuction created successfully! ID: " + listing.auctionId());
+                            } else {
+                                sender.sendMessage("§cFailed to create auction.");
+                            }
+                        });
+                    });
+        } else if (sub.equals("bid")) {
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage("§cOnly players can bid.");
+                return;
+            }
+            if (args.length < 4) {
+                sender.sendMessage("§cUsage: /vaultx auction bid <auctionId> <amount>");
+                return;
+            }
+            String auctionId = args[2];
+            double amount = Double.parseDouble(args[3]);
+            Vault.getAuctionManager().placeBidAsync(player, auctionId, amount,
+                    (p, c) -> (econ instanceof MultiCurrencyEconomy m) ? m.getCurrencyBalance(p, c)
+                            : (c.equalsIgnoreCase("default") ? econ.getBalance(p) : 0.0),
+                    (p, c, a) -> (econ instanceof MultiCurrencyEconomy m) ? m.withdrawCurrencyPlayer(p, c, a)
+                            : (c.equalsIgnoreCase("default") ? econ.withdrawPlayer(p, a)
+                                    : new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Not supported")),
+                    (p, c, a) -> (econ instanceof MultiCurrencyEconomy m) ? m.depositCurrencyPlayer(p, c, a)
+                            : (c.equalsIgnoreCase("default") ? econ.depositPlayer(p, a)
+                                    : new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Not supported")),
+                    java.util.concurrent.ForkJoinPool.commonPool()).thenAccept(res -> {
+                        runSync(() -> sender.sendMessage(
+                                res.transactionSuccess() ? "§a" + res.errorMessage : "§c" + res.errorMessage));
+                    });
+        } else if (sub.equals("cancel")) {
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage("§cOnly players can cancel auctions.");
+                return;
+            }
+            if (args.length < 3) {
+                sender.sendMessage("§cUsage: /vaultx auction cancel <auctionId>");
+                return;
+            }
+            String auctionId = args[2];
+            Vault.getAuctionManager()
+                    .cancelAuctionAsync(player, auctionId, java.util.concurrent.ForkJoinPool.commonPool())
+                    .thenAccept(res -> {
+                        runSync(() -> sender.sendMessage(
+                                res.transactionSuccess() ? "§aAuction cancelled!" : "§c" + res.errorMessage));
+                    });
+        } else if (sub.equals("list")) {
+            Vault.getAuctionManager().getActiveAuctionsAsync(java.util.concurrent.ForkJoinPool.commonPool())
+                    .thenAccept(auctions -> {
+                        runSync(() -> {
+                            sender.sendMessage("§e=== Active Auctions ===");
+                            for (var a : auctions) {
+                                sender.sendMessage("§7[" + a.auctionId() + "] §f" + a.item().getType() + " §8| Bid: §a"
+                                        + a.currentBid() + " " + a.currency());
+                            }
+                        });
+                    });
+        }
+    }
+}
