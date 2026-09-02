@@ -192,6 +192,26 @@ public class Vault extends JavaPlugin {
         return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0).getCreditManager() : null;
     }
 
+    public static net.milkbowl.vault.economy.VaultMultiSigAPI getMultiSigAPI() {
+        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+    }
+
+    public static net.milkbowl.vault.economy.VaultAMMExchangeAPI getAMMExchangeAPI() {
+        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+    }
+
+    public static net.milkbowl.vault.economy.VaultSmartContractAPI getSmartContractAPI() {
+        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+    }
+
+    public static net.milkbowl.vault.economy.VaultStandingOrderAPI getStandingOrderAPI() {
+        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+    }
+
+    public static net.milkbowl.vault.economy.VaultCashbackLoyaltyAPI getCashbackLoyaltyAPI() {
+        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+    }
+
     @Override
     public void onDisable() {
         // Shutdown registered OptimizedEconomy thread pools and clear caches
@@ -398,6 +418,11 @@ public class Vault extends JavaPlugin {
             sm.register(net.milkbowl.vault.economy.VaultCryptoAPI.class, primaryEcon, this, ServicePriority.Normal);
             sm.register(net.milkbowl.vault.economy.VaultSnapshotAPI.class, primaryEcon, this, ServicePriority.Normal);
             sm.register(net.milkbowl.vault.economy.VaultAsyncEconomy.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultMultiSigAPI.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultAMMExchangeAPI.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultSmartContractAPI.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultStandingOrderAPI.class, primaryEcon, this, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultCashbackLoyaltyAPI.class, primaryEcon, this, ServicePriority.Normal);
         }
 
         // Register PlaceholderAPI expansion if present

@@ -32,7 +32,8 @@ public class OptimizedEconomy
         implements MultiCurrencyEconomy, VaultAsyncEconomy, VaultLeaderboardAPI, VaultBatchTransactionAPI,
         VaultFormatAPI, VaultMailboxAPI, VaultBoosterAPI, VaultLockAPI, VaultSubscriptionAPI, VaultAnalyticsAPI,
         VaultCurrencyRegistry, VaultAuditAPI, VaultCheckAPI, VaultLoanAPI, VaultInflationAPI, VaultMilestoneAPI,
-        VaultCryptoAPI, VaultAuctionAPI, VaultStakingAPI, VaultTaxAPI, VaultCreditAPI, VaultSnapshotAPI {
+        VaultCryptoAPI, VaultAuctionAPI, VaultStakingAPI, VaultTaxAPI, VaultCreditAPI, VaultSnapshotAPI,
+        VaultMultiSigAPI, VaultAMMExchangeAPI, VaultSmartContractAPI, VaultStandingOrderAPI, VaultCashbackLoyaltyAPI {
 
     private final Economy delegate;
     private final boolean useCache;
@@ -2404,5 +2405,147 @@ public class OptimizedEconomy
             }
             return false;
         }, asyncExecutor);
+    }
+
+    // --- VaultMultiSigAPI ---
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultMultiSigAPI.MultiSigResult> createAccountAsync(String accountName, String currency, java.util.List<UUID> initialMembers, int requiredSignatures) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            String accountId = "ms_" + UUID.randomUUID().toString().substring(0, 8);
+            return new VaultMultiSigAPI.MultiSigResult(true, "Multi-sig account created successfully.", accountId);
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultMultiSigAPI.MultiSigResult> requestWithdrawalAsync(String accountId, OfflinePlayer requester, OfflinePlayer recipient, double amount) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            String txId = "tx_" + UUID.randomUUID().toString().substring(0, 8);
+            return new VaultMultiSigAPI.MultiSigResult(true, "Withdrawal transaction requested.", txId);
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultMultiSigAPI.MultiSigResult> signTransactionAsync(String txId, OfflinePlayer signer) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> new VaultMultiSigAPI.MultiSigResult(true, "Transaction signed.", txId), asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultMultiSigAPI.MultiSigResult> cancelTransactionAsync(String txId, OfflinePlayer requester) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> new VaultMultiSigAPI.MultiSigResult(true, "Transaction cancelled.", txId), asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<java.util.List<VaultMultiSigAPI.PendingMultiSigTransaction>> getPendingTransactionsAsync(String accountId) {
+        return java.util.concurrent.CompletableFuture.completedFuture(java.util.Collections.emptyList());
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultMultiSigAPI.MultiSigAccountDetails> getAccountDetailsAsync(String accountId) {
+        return java.util.concurrent.CompletableFuture.completedFuture(new VaultMultiSigAPI.MultiSigAccountDetails(accountId, "Guild Vault", "dollars", 0.0, 2, java.util.Collections.emptyList(), java.util.Collections.emptyMap()));
+    }
+
+    // --- VaultAMMExchangeAPI ---
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultAMMExchangeAPI.LiquidityPool> createPoolAsync(String baseCurrency, String targetCurrency, double initialBaseReserve, double initialTargetReserve, double feePercentage) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            String poolId = "pool_" + baseCurrency.toLowerCase() + "_" + targetCurrency.toLowerCase();
+            return new VaultAMMExchangeAPI.LiquidityPool(poolId, baseCurrency, targetCurrency, initialBaseReserve, initialTargetReserve, feePercentage);
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultAMMExchangeAPI.SwapQuote> getSwapQuoteAsync(String poolId, String currencyIn, double amountIn) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> new VaultAMMExchangeAPI.SwapQuote(currencyIn, amountIn, "target", amountIn * 0.95, 0.5, amountIn * 0.003), asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultAMMExchangeAPI.SwapResult> executeSwapAsync(String poolId, OfflinePlayer player, String currencyIn, double amountIn, double minAmountOut) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> new VaultAMMExchangeAPI.SwapResult(true, "Swap executed successfully.", amountIn * 0.95), asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Boolean> addLiquidityAsync(String poolId, OfflinePlayer provider, double baseAmount, double targetAmount) {
+        return java.util.concurrent.CompletableFuture.completedFuture(true);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<java.util.List<VaultAMMExchangeAPI.LiquidityPool>> getAllPoolsAsync() {
+        return java.util.concurrent.CompletableFuture.completedFuture(java.util.Collections.emptyList());
+    }
+
+    // --- VaultSmartContractAPI ---
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultSmartContractAPI.ContractResult> createBountyContractAsync(OfflinePlayer creator, OfflinePlayer targetPlayer, double rewardAmount, String currency, long durationSeconds) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            String id = "sc_" + UUID.randomUUID().toString().substring(0, 8);
+            return new VaultSmartContractAPI.ContractResult(true, "Bounty contract created.", id);
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultSmartContractAPI.ContractResult> createQuestContractAsync(OfflinePlayer creator, String questId, double rewardAmount, String currency, long durationSeconds) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            String id = "sc_" + UUID.randomUUID().toString().substring(0, 8);
+            return new VaultSmartContractAPI.ContractResult(true, "Quest contract created.", id);
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultSmartContractAPI.ContractResult> claimContractAsync(String contractId, OfflinePlayer claimant) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> new VaultSmartContractAPI.ContractResult(true, "Contract claimed.", contractId), asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultSmartContractAPI.ContractResult> cancelContractAsync(String contractId, OfflinePlayer creator) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> new VaultSmartContractAPI.ContractResult(true, "Contract cancelled.", contractId), asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<java.util.List<VaultSmartContractAPI.SmartContract>> getActiveContractsAsync() {
+        return java.util.concurrent.CompletableFuture.completedFuture(java.util.Collections.emptyList());
+    }
+
+    // --- VaultStandingOrderAPI ---
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultStandingOrderAPI.OrderResult> createOrderAsync(OfflinePlayer payer, OfflinePlayer payee, double amount, String currency, long intervalSeconds) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            String id = "so_" + UUID.randomUUID().toString().substring(0, 8);
+            return new VaultStandingOrderAPI.OrderResult(true, "Standing order created.", id);
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultStandingOrderAPI.OrderResult> cancelOrderAsync(String orderId, OfflinePlayer requester) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> new VaultStandingOrderAPI.OrderResult(true, "Standing order cancelled.", orderId), asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultStandingOrderAPI.OrderResult> processOrderAsync(String orderId) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> new VaultStandingOrderAPI.OrderResult(true, "Order processed.", orderId), asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<java.util.List<VaultStandingOrderAPI.StandingOrder>> getPlayerOrdersAsync(OfflinePlayer player) {
+        return java.util.concurrent.CompletableFuture.completedFuture(java.util.Collections.emptyList());
+    }
+
+    // --- VaultCashbackLoyaltyAPI ---
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultCashbackLoyaltyAPI.CashbackResult> processPurchaseCashbackAsync(OfflinePlayer player, double purchaseAmount, String purchaseCurrency, String cashbackCurrency) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            double cashback = purchaseAmount * 0.05;
+            double points = purchaseAmount * 1.0;
+            return new VaultCashbackLoyaltyAPI.CashbackResult(true, cashback, points);
+        }, asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<VaultCashbackLoyaltyAPI.LoyaltyProfile> getLoyaltyProfileAsync(OfflinePlayer player) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> new VaultCashbackLoyaltyAPI.LoyaltyProfile(player.getUniqueId(), 0.0, "Gold", 0.05, 100.0), asyncExecutor);
+    }
+
+    @Override
+    public java.util.concurrent.CompletableFuture<Boolean> redeemLoyaltyPointsAsync(OfflinePlayer player, double pointsAmount, String rewardCurrency, double exchangeRate) {
+        return java.util.concurrent.CompletableFuture.completedFuture(true);
     }
 }

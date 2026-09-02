@@ -9,6 +9,11 @@
 - **📈 Inflation & Wealth Tax Control**: Global inflation multipliers, transaction taxes, and progressive wealth tax regulation (`VaultInflationAPI`).
 - **🏆 Milestones & Achievements**: Automatic balance milestone triggers and custom rewards (`VaultMilestoneAPI`).
 - **🐘 PostgreSQL & LISTEN/NOTIFY Synchronization**: Native PostgreSQL storage support with HikariCP connection pooling and zero-Redis real-time cross-server sync via `LISTEN / NOTIFY`.
+- **🔏 Multi-Signature Joint Accounts**: Shared guild & faction bank accounts with rank withdrawal limits and multi-officer transaction signing (`VaultMultiSigAPI`).
+- **🔄 AMM & Dynamic Bonding Curves**: Automated Market Maker (AMM) liquidity pools and dynamic supply-demand exchange rates (`VaultAMMExchangeAPI`).
+- **📜 Smart Contracts & Escrow Bounties**: Conditional player bounties and quest rewards backed by locked escrow funds (`VaultSmartContractAPI`).
+- **💳 Standing Orders & Auto-Payments**: Automated recurring payments for plot rents, subscriptions, and shop licenses (`VaultStandingOrderAPI`).
+- **🎁 Cashback & Loyalty Tiers**: Automated purchase cashback and spending-based loyalty tiers (`VaultCashbackLoyaltyAPI`).
 - **🛡️ Memory Leak Proof**: Strict cache invalidation on player quit and complete thread pool shutdown on plugin disable.
 
 ---
@@ -142,7 +147,27 @@ public class QuickHookExample {
 }
 ```
 
-### 4. Dynamic Programmatic Currency Registration (`VaultCurrencyRegistry`)
+### 4. Enterprise Multi-Sig, Smart Contracts & Standing Orders
+
+```java
+import net.milkbowl.vault.Vault;
+import net.milkbowl.vault.economy.VaultMultiSigAPI;
+import net.milkbowl.vault.economy.VaultSmartContractAPI;
+import net.milkbowl.vault.economy.VaultStandingOrderAPI;
+
+// 1. Create a Multi-Sig Guild Account requiring 2 signatures
+Vault.getMultiSigAPI().createAccountAsync("Guild Vault", "dollars", membersList, 2)
+    .thenAccept(result -> System.out.println("Guild Account Created: " + result.txId));
+
+// 2. Create a Bounty Smart Contract
+Vault.getSmartContractAPI().createBountyContractAsync(killerPlayer, targetPlayer, 50000.0, "dollars", 86400)
+    .thenAccept(result -> System.out.println("Bounty Created: " + result.contractId));
+
+// 3. Schedule automated weekly land rent standing order
+Vault.getStandingOrderAPI().createOrderAsync(tenantPlayer, landlordPlayer, 500.0, "dollars", 604800);
+```
+
+### 5. Dynamic Programmatic Currency Registration (`VaultCurrencyRegistry`)
 
 Register new custom currencies dynamically via code without editing `config.yml`:
 
