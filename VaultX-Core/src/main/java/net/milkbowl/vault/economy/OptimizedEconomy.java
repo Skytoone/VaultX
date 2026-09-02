@@ -852,6 +852,28 @@ public class OptimizedEconomy
         return bal;
     }
 
+    private final ThreadLocal<java.text.DecimalFormat> cachedDecimalFormat = new ThreadLocal<>();
+
+    private java.text.DecimalFormat getDecimalFormat() {
+        java.text.DecimalFormat df = cachedDecimalFormat.get();
+        if (df == null) {
+            String decSepStr = plugin != null ? plugin.getConfig().getString("formatting.decimal-separator", ".") : ".";
+            String thousandSepStr = plugin != null ? plugin.getConfig().getString("formatting.thousands-separator", ",") : ",";
+            int decimals = plugin != null ? plugin.getConfig().getInt("formatting.decimal-places", 2) : 2;
+
+            char decSep = (decSepStr != null && !decSepStr.isEmpty()) ? decSepStr.charAt(0) : '.';
+            char thousandSep = (thousandSepStr != null && !thousandSepStr.isEmpty()) ? thousandSepStr.charAt(0) : ',';
+
+            java.text.DecimalFormatSymbols symbols = new java.text.DecimalFormatSymbols(java.util.Locale.US);
+            symbols.setDecimalSeparator(decSep);
+            symbols.setGroupingSeparator(thousandSep);
+
+            df = new java.text.DecimalFormat("#,##0" + (decimals > 0 ? "." + "0".repeat(decimals) : ""), symbols);
+            cachedDecimalFormat.set(df);
+        }
+        return df;
+    }
+
     @Override
     public int fractionalDigits() {
         return delegate != null ? delegate.fractionalDigits() : 2;
@@ -863,17 +885,9 @@ public class OptimizedEconomy
             return delegate.format(amount);
         String symbol = plugin.getConfig().getString("formatting.symbol", "$");
         String position = plugin.getConfig().getString("formatting.symbol-position", "AFTER");
-        int decimals = plugin.getConfig().getInt("formatting.decimal-places", 2);
         boolean shortFormat = plugin.getConfig().getBoolean("formatting.use-short-format", false);
         String decSepStr = plugin.getConfig().getString("formatting.decimal-separator", ".");
-        String thousandSepStr = plugin.getConfig().getString("formatting.thousands-separator", ",");
-
         char decSep = (decSepStr != null && !decSepStr.isEmpty()) ? decSepStr.charAt(0) : '.';
-        char thousandSep = (thousandSepStr != null && !thousandSepStr.isEmpty()) ? thousandSepStr.charAt(0) : ',';
-
-        java.text.DecimalFormatSymbols symbols = new java.text.DecimalFormatSymbols(java.util.Locale.US);
-        symbols.setDecimalSeparator(decSep);
-        symbols.setGroupingSeparator(thousandSep);
 
         if (shortFormat) {
             String formatted;
@@ -884,16 +898,12 @@ public class OptimizedEconomy
             } else if (amount >= 1_000) {
                 formatted = String.format(java.util.Locale.US, "%.2fk", amount / 1_000.0).replace('.', decSep);
             } else {
-                java.text.DecimalFormat df = new java.text.DecimalFormat(
-                        "#,##0" + (decimals > 0 ? "." + "0".repeat(decimals) : ""), symbols);
-                formatted = df.format(amount);
+                formatted = getDecimalFormat().format(amount);
             }
             return "BEFORE".equalsIgnoreCase(position) ? symbol + formatted : formatted + symbol;
         }
 
-        java.text.DecimalFormat df = new java.text.DecimalFormat(
-                "#,##0" + (decimals > 0 ? "." + "0".repeat(decimals) : ""), symbols);
-        String val = df.format(amount);
+        String val = getDecimalFormat().format(amount);
         return "BEFORE".equalsIgnoreCase(position) ? symbol + val : val + symbol;
     }
 

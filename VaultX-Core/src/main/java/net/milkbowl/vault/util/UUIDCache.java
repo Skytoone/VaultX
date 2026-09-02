@@ -17,8 +17,8 @@ public class UUIDCache implements Listener {
     private static final Map<String, UUID> nameToUuid = new ConcurrentHashMap<>();
     private static final Map<UUID, String> uuidToName = new ConcurrentHashMap<>();
     private static final Map<String, Long> negativeCache = new ConcurrentHashMap<>();
-    private static final java.util.Set<String> accessOrderNameQueue = new java.util.LinkedHashSet<>();
-    private static final java.util.Set<UUID> accessOrderUuidQueue = new java.util.LinkedHashSet<>();
+    private static final java.util.Queue<String> accessOrderNameQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private static final java.util.Queue<UUID> accessOrderUuidQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
     private static final long NEGATIVE_CACHE_EXPIRATION_MS = 300000; // 5 minutes
     private static final int MAX_NEGATIVE_CACHE_SIZE = 2000;
     private static boolean enabled = false;
@@ -32,47 +32,33 @@ public class UUIDCache implements Listener {
     private static synchronized void putCache(String name, UUID uuid) {
         if (name == null || uuid == null) return;
         String lowerName = name.toLowerCase();
-        UUID oldUuid = nameToUuid.get(lowerName);
+        UUID oldUuid = nameToUuid.put(lowerName, uuid);
         if (oldUuid != null && !oldUuid.equals(uuid)) {
             uuidToName.remove(oldUuid);
-            accessOrderUuidQueue.remove(oldUuid);
         }
-        
-        accessOrderNameQueue.remove(lowerName);
+        uuidToName.put(uuid, name);
+
         accessOrderNameQueue.add(lowerName);
-        accessOrderUuidQueue.remove(uuid);
         accessOrderUuidQueue.add(uuid);
 
-        if (nameToUuid.size() >= maxCacheSize && !nameToUuid.containsKey(lowerName)) {
-            java.util.Iterator<String> it = accessOrderNameQueue.iterator();
-            if (it.hasNext()) {
-                String oldestName = it.next();
-                it.remove();
-                if (oldestName != null) {
-                    UUID removedUuid = nameToUuid.remove(oldestName);
-                    if (removedUuid != null) {
-                        uuidToName.remove(removedUuid);
-                        accessOrderUuidQueue.remove(removedUuid);
-                    }
+        if (nameToUuid.size() > maxCacheSize) {
+            String oldestName = accessOrderNameQueue.poll();
+            if (oldestName != null && !oldestName.equals(lowerName)) {
+                UUID removedUuid = nameToUuid.remove(oldestName);
+                if (removedUuid != null) {
+                    uuidToName.remove(removedUuid);
                 }
             }
         }
-        if (uuidToName.size() >= maxCacheSize && !uuidToName.containsKey(uuid)) {
-            java.util.Iterator<UUID> it = accessOrderUuidQueue.iterator();
-            if (it.hasNext()) {
-                UUID oldestUuid = it.next();
-                it.remove();
-                if (oldestUuid != null) {
-                    String removedName = uuidToName.remove(oldestUuid);
-                    if (removedName != null) {
-                        nameToUuid.remove(removedName.toLowerCase());
-                        accessOrderNameQueue.remove(removedName.toLowerCase());
-                    }
+        if (uuidToName.size() > maxCacheSize) {
+            UUID oldestUuid = accessOrderUuidQueue.poll();
+            if (oldestUuid != null && !oldestUuid.equals(uuid)) {
+                String removedName = uuidToName.remove(oldestUuid);
+                if (removedName != null) {
+                    nameToUuid.remove(removedName.toLowerCase());
                 }
             }
         }
-        nameToUuid.put(lowerName, uuid);
-        uuidToName.put(uuid, name);
     }
 
     private static final java.lang.invoke.MethodHandle GET_OFFLINE_PLAYER_IF_CACHED_MH;
