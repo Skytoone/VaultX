@@ -27,7 +27,7 @@ public final class StripedLock {
         if (uuid == null) {
             return locks[0];
         }
-        int index = (uuid.hashCode() & 0x7FFFFFFF) % STRIPE_COUNT;
+        int index = (uuid.hashCode() & 0x7FFFFFFF) & (STRIPE_COUNT - 1);
         return locks[index];
     }
 
@@ -41,7 +41,7 @@ public final class StripedLock {
         if (key == null) {
             return locks[0];
         }
-        int index = (key.hashCode() & 0x7FFFFFFF) % STRIPE_COUNT;
+        int index = (key.hashCode() & 0x7FFFFFFF) & (STRIPE_COUNT - 1);
         return locks[index];
     }
 }

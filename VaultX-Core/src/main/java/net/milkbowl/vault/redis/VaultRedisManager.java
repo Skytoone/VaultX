@@ -157,27 +157,33 @@ public class VaultRedisManager {
         }
 
         // Flush all pending balances synchronously before shutting down
-        for (Map.Entry<String, Double> entry : pendingBalances.entrySet()) {
-            String[] parts = entry.getKey().split(":");
-            if (parts.length == 2) {
-                try {
-                    UUID playerUuid = UUID.fromString(parts[0]);
-                    String curr = parts[1];
-                    double balance = entry.getValue();
-                    long timestamp = System.currentTimeMillis();
-                    if (isOnline()) {
-                        try (redis.clients.jedis.Jedis jedis = pool.getResource()) {
+        if (isOnline() && !pendingBalances.isEmpty()) {
+            try (redis.clients.jedis.Jedis jedis = pool.getResource()) {
+                for (Map.Entry<String, Double> entry : pendingBalances.entrySet()) {
+                    String[] parts = entry.getKey().split(":");
+                    if (parts.length == 2) {
+                        try {
+                            UUID playerUuid = UUID.fromString(parts[0]);
+                            String curr = parts[1];
+                            double balance = entry.getValue();
+                            long timestamp = System.currentTimeMillis();
                             jedis.hset("vaultx:balances:" + playerUuid.toString(), curr, String.valueOf(balance));
                             jedis.hset("vaultx:timestamps:" + playerUuid.toString(), curr, String.valueOf(timestamp));
                             updateLeaderboardAndStats(jedis, curr, playerUuid.toString(), balance);
                             String payload = serverId + ":" + playerUuid.toString() + ":" + curr + ":" + balance + ":"
                                     + timestamp;
                             jedis.publish(syncChannel, payload);
-                        }
-                    } else {
-                        failoverManager.queueBalanceSync(playerUuid, curr, balance);
+                        } catch (Exception ignored) {}
                     }
-                } catch (Exception ignored) {
+                }
+            } catch (Exception e) {
+                for (Map.Entry<String, Double> entry : pendingBalances.entrySet()) {
+                    String[] parts = entry.getKey().split(":");
+                    if (parts.length == 2) {
+                        try {
+                            failoverManager.queueBalanceSync(UUID.fromString(parts[0]), parts[1], entry.getValue());
+                        } catch (Exception ignored) {}
+                    }
                 }
             }
         }

@@ -41,18 +41,18 @@ public class UUIDCache implements Listener {
         accessOrderNameQueue.add(lowerName);
         accessOrderUuidQueue.add(uuid);
 
-        if (nameToUuid.size() > maxCacheSize) {
+        while (nameToUuid.size() > maxCacheSize && !accessOrderNameQueue.isEmpty()) {
             String oldestName = accessOrderNameQueue.poll();
-            if (oldestName != null && !oldestName.equals(lowerName)) {
+            if (oldestName != null && nameToUuid.containsKey(oldestName)) {
                 UUID removedUuid = nameToUuid.remove(oldestName);
                 if (removedUuid != null) {
                     uuidToName.remove(removedUuid);
                 }
             }
         }
-        if (uuidToName.size() > maxCacheSize) {
+        while (uuidToName.size() > maxCacheSize && !accessOrderUuidQueue.isEmpty()) {
             UUID oldestUuid = accessOrderUuidQueue.poll();
-            if (oldestUuid != null && !oldestUuid.equals(uuid)) {
+            if (oldestUuid != null && uuidToName.containsKey(oldestUuid)) {
                 String removedName = uuidToName.remove(oldestUuid);
                 if (removedName != null) {
                     nameToUuid.remove(removedName.toLowerCase());
