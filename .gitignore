@@ -2,6 +2,8 @@
 target/
 **/target/
 *.jar
+!jar/
+!jar/*.jar
 *.war
 *.ear
 
