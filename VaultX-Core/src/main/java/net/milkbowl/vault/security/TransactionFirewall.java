@@ -279,7 +279,7 @@ public class TransactionFirewall implements VaultFirewallAPI {
         }
 
         // 3. Spike detection (Estimate if transaction would cause spike without recording it yet)
-        if (spikeEnabled && "DEPOSIT".equalsIgnoreCase(type) && player.isOnline()) {
+        if (spikeEnabled && ("DEPOSIT".equalsIgnoreCase(type) || "WITHDRAW".equalsIgnoreCase(type)) && player.isOnline()) {
             long now = System.currentTimeMillis();
             List<TransactionRecord> history = transactionHistory.computeIfAbsent(player.getUniqueId(), k -> new ArrayList<>());
 
@@ -298,7 +298,7 @@ public class TransactionFirewall implements VaultFirewallAPI {
                 if (sum > minimumThreshold) {
                     double checkBalance = Math.max(currentBalance, 100.0); // prevent division by zero or tiny balances
                     if (sum > checkBalance * spikeFactor) {
-                        String reason = "Spike detected! Total deposits in last " + timeWindowSeconds + "s is " + sum + " (factor x" + spikeFactor + " of baseline balance " + currentBalance + ")";
+                        String reason = "Spike detected (" + type.toUpperCase() + ")! Total activity in last " + timeWindowSeconds + "s is " + sum + " (factor x" + spikeFactor + " of baseline balance " + currentBalance + ")";
                         logAuditAsync(player, sum, "SPIKE_DETECTED", reason);
                         webhookNotifier.sendAlertAsync("SPIKE_DETECTED", player, reason, 15158332);
                         if (autoFreeze) {

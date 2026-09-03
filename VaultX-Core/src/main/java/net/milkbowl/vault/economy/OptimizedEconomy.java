@@ -744,7 +744,7 @@ public class OptimizedEconomy
             if (response.transactionSuccess()) {
                 updateCache(player, currency, response.balance);
                 triggerEventAsync(player, amount, currency, eventType);
-                if (net.milkbowl.vault.Vault.getFirewall() != null && eventType == TransactionType.DEPOSIT) {
+                if (net.milkbowl.vault.Vault.getFirewall() != null) {
                     net.milkbowl.vault.Vault.getFirewall().recordTransaction(player, amount);
                 }
                 if (player.isOnline() && player.getPlayer() != null) {

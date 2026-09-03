@@ -80,12 +80,16 @@ public class VaultRedisManager {
     private static final int MAX_COOLDOWN_MS = 60000;
     private final java.util.Random random = new java.util.Random();
 
+    private final RedisPayloadEncryptor encryptor;
+
     public VaultRedisManager(Plugin plugin, String host, int port, String password, String serverId, String channel) {
         this.plugin = plugin;
         this.serverId = serverId;
         this.syncChannel = channel;
         this.failoverManager = net.milkbowl.vault.Vault.getFailoverManager();
         this.redisExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+        String encryptionKey = plugin.getConfig().getString("redis.encryption-key", "");
+        this.encryptor = new RedisPayloadEncryptor(encryptionKey);
 
         int maxConnections = plugin.getConfig().getInt("redis.max-connections", 16);
         int timeoutMs = plugin.getConfig().getInt("redis.connection-timeout-ms", 250);
@@ -113,7 +117,11 @@ public class VaultRedisManager {
             syncFrozenPlayers();
         }
 
-        plugin.getLogger().info("[VaultRedis] Redis synchronization enabled for server: " + serverId);
+        plugin.getLogger().info("[VaultRedis] Redis synchronization enabled for server: " + serverId + (encryptor.isEnabled() ? " (AES Encrypted)" : ""));
+    }
+
+    public RedisPayloadEncryptor getEncryptor() {
+        return encryptor;
     }
 
     public static VaultRedisManager getInstance() {
@@ -172,7 +180,7 @@ public class VaultRedisManager {
                             updateLeaderboardAndStats(jedis, curr, playerUuid.toString(), balance);
                             String payload = serverId + ":" + playerUuid.toString() + ":" + curr + ":" + balance + ":"
                                     + timestamp;
-                            jedis.publish(syncChannel, payload);
+                            publishPayload(jedis, payload);
                         } catch (Exception ignored) {}
                     }
                 }
@@ -211,6 +219,10 @@ public class VaultRedisManager {
         instance = null;
     }
 
+    private void publishPayload(redis.clients.jedis.Jedis jedis, String payload) {
+        jedis.publish(syncChannel, encryptor.encrypt(payload));
+    }
+
     private void startSubscriber() {
         subscriberTask = net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, new Runnable() {
             @Override
@@ -222,7 +234,7 @@ public class VaultRedisManager {
                                 @Override
                                 public void onMessage(String channel, String message) {
                                     if (channel.equals(syncChannel)) {
-                                        handleSyncMessage(message);
+                                        handleSyncMessage(encryptor.decrypt(message));
                                     }
                                 }
                             };
@@ -444,7 +456,7 @@ public class VaultRedisManager {
                     updateLeaderboardAndStats(jedis, curr, playerUuid.toString(), balance);
                     String payload = serverId + ":" + playerUuid.toString() + ":" + curr + ":" + balance + ":"
                             + timestamp;
-                    jedis.publish(syncChannel, payload);
+                    publishPayload(jedis, payload);
                 } catch (Exception e) {
                     plugin.getLogger()
                             .warning("[VaultRedis] Failed to publish balance update to Redis. Queueing locally: "
@@ -466,7 +478,7 @@ public class VaultRedisManager {
                 try (redis.clients.jedis.Jedis jedis = pool.getResource()) {
                     String payload = serverId + ":BANK_MEMBER_UPDATE:" + bankName.toLowerCase() + ":" + uuid.toString()
                             + ":" + role.toUpperCase();
-                    jedis.publish(syncChannel, payload);
+                    publishPayload(jedis, payload);
                 } catch (Exception e) {
                     plugin.getLogger().warning("[VaultRedis] Failed to publish bank member update: " + e.getMessage());
                 }
@@ -501,7 +513,7 @@ public class VaultRedisManager {
                 try (redis.clients.jedis.Jedis jedis = pool.getResource()) {
                     jedis.hset("vaultx:banks", bankName, String.valueOf(balance));
                     String payload = serverId + ":BANK:" + bankName + ":" + balance;
-                    jedis.publish(syncChannel, payload);
+                    publishPayload(jedis, payload);
                 } catch (Exception e) {
                     plugin.getLogger().warning("[VaultRedis] Failed to sync bank update: " + e.getMessage());
                 }
@@ -563,7 +575,7 @@ public class VaultRedisManager {
                 try (redis.clients.jedis.Jedis jedis = pool.getResource()) {
                     jedis.sadd("vaultx:frozen_players", uuid.toString());
                     String payload = serverId + ":FREEZE:" + uuid.toString() + ":" + reason;
-                    jedis.publish(syncChannel, payload);
+                    publishPayload(jedis, payload);
                 } catch (Exception e) {
                     plugin.getLogger().warning("[VaultRedis] Failed to publish freeze update: " + e.getMessage());
                 }
@@ -580,7 +592,7 @@ public class VaultRedisManager {
                 try (redis.clients.jedis.Jedis jedis = pool.getResource()) {
                     jedis.srem("vaultx:frozen_players", uuid.toString());
                     String payload = serverId + ":UNFREEZE:" + uuid.toString();
-                    jedis.publish(syncChannel, payload);
+                    publishPayload(jedis, payload);
                 } catch (Exception e) {
                     plugin.getLogger().warning("[VaultRedis] Failed to publish unfreeze update: " + e.getMessage());
                 }
@@ -656,7 +668,7 @@ public class VaultRedisManager {
                     jedis.hset("vaultx:timestamps:" + uuid.toString(), curr, String.valueOf(timestamp));
                     updateLeaderboardAndStats(jedis, curr, uuid.toString(), balance);
                     String payload = serverId + ":" + uuid.toString() + ":" + curr + ":" + balance + ":" + timestamp;
-                    jedis.publish(syncChannel, payload);
+                    publishPayload(jedis, payload);
                 } catch (Exception e) {
                     plugin.getLogger().warning("Failed to sync custom currency update: " + e.getMessage());
                 }
@@ -754,7 +766,7 @@ public class VaultRedisManager {
             jedis.hset("vaultx:timestamps:" + uuid.toString(), curr, String.valueOf(timestamp));
             updateLeaderboardAndStats(jedis, curr, uuid.toString(), balance);
             String payload = serverId + ":" + uuid.toString() + ":" + curr + ":" + balance + ":" + timestamp;
-            jedis.publish(syncChannel, payload);
+            publishPayload(jedis, payload);
         } catch (Exception e) {
             plugin.getLogger().warning("[VaultRedis] Failed to direct publish balance update: " + e.getMessage());
             failoverManager.queueBalanceSync(uuid, currency, balance);
