@@ -16,7 +16,7 @@ public class VaultStockPriceChangeEvent extends Event {
     private final double percentageChange;
 
     public VaultStockPriceChangeEvent(String stockSymbol, double oldPrice, double newPrice) {
-        super(true); // Asynchronous
+        super(false);
         this.stockSymbol = stockSymbol;
         this.oldPrice = oldPrice;
         this.newPrice = newPrice;
