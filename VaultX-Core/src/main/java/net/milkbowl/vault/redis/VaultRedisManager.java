@@ -324,6 +324,7 @@ public class VaultRedisManager {
                         failoverManager.addBankMember(bankName, uuid, role);
                     }
                 } catch (Exception e) {
+                    plugin.getLogger().fine("[VaultRedis] Error processing BANK_MEMBER_UPDATE sync: " + e.getMessage());
                 }
                 return;
             }
@@ -338,6 +339,7 @@ public class VaultRedisManager {
                         ((OptimizedEconomy) rsp.getProvider()).updateBankCacheFromRedis(bankName, balance);
                     }
                 } catch (Exception e) {
+                    plugin.getLogger().fine("[VaultRedis] Error processing BANK sync: " + e.getMessage());
                 }
                 return;
             }
@@ -355,6 +357,7 @@ public class VaultRedisManager {
                         }
                     });
                 } catch (Exception e) {
+                    plugin.getLogger().fine("[VaultRedis] Error processing FREEZE sync: " + e.getMessage());
                 }
                 return;
             }
@@ -371,6 +374,7 @@ public class VaultRedisManager {
                         }
                     });
                 } catch (Exception e) {
+                    plugin.getLogger().fine("[VaultRedis] Error processing UNFREEZE sync: " + e.getMessage());
                 }
                 return;
             }
@@ -704,8 +708,7 @@ public class VaultRedisManager {
                         double balance = tuple.getScore();
                         String name = net.milkbowl.vault.util.UUIDCache.getName(uuid);
                         if (name == null) {
-                            org.bukkit.OfflinePlayer op = Bukkit.getOfflinePlayer(uuid);
-                            name = op != null ? op.getName() : "Unknown";
+                            name = uuid.toString();
                         }
                         entries.add(new LeaderboardEntry(name, balance));
                     } catch (Exception ex) {
@@ -714,6 +717,7 @@ public class VaultRedisManager {
                 }
                 leaderboardCaches.put(currency, java.util.Collections.unmodifiableList(entries));
             }
+            leaderboardCaches.keySet().retainAll(currencies);
         } catch (Exception e) {
             plugin.getLogger().warning("[VaultRedis] Failed to update leaderboards from Redis: " + e.getMessage());
         }

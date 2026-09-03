@@ -78,6 +78,11 @@ public class TransactionFirewall implements VaultFirewallAPI {
             } catch (Exception ignored) {}
             inflationTask = null;
         }
+        if (webhookNotifier != null) {
+            try {
+                webhookNotifier.close();
+            } catch (Exception ignored) {}
+        }
         transactionHistory.clear();
         activeTransfers.clear();
         synchronized (supplySnapshots) {

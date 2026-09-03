@@ -131,8 +131,19 @@ public class DiscordWebhookNotifier {
         }
     }
 
+    private org.bukkit.scheduler.BukkitTask retryTask;
+
+    public void close() {
+        if (retryTask != null) {
+            try {
+                retryTask.cancel();
+            } catch (Exception ignored) {}
+            retryTask = null;
+        }
+    }
+
     private void startRetryScheduler() {
-        net.milkbowl.vault.util.FoliaScheduler.runTimerAsync(plugin, new Runnable() {
+        retryTask = net.milkbowl.vault.util.FoliaScheduler.runTimerAsync(plugin, new Runnable() {
             @Override
             public void run() {
                 if (!enabled || webhookUrl == null || webhookUrl.isEmpty() || webhookUrl.startsWith("YOUR_")) {

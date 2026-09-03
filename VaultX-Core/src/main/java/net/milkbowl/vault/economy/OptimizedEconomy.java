@@ -46,6 +46,10 @@ public class OptimizedEconomy
     private final boolean autoConvert;
     private final org.bukkit.configuration.ConfigurationSection exchangeRates;
     private final long onlineCacheTtlMs;
+    private final String formatSymbol;
+    private final String formatPosition;
+    private final boolean formatUseShort;
+    private final char formatDecSep;
     private final java.util.concurrent.ExecutorService asyncExecutor = java.util.concurrent.Executors
             .newVirtualThreadPerTaskExecutor();
 
@@ -132,6 +136,11 @@ public class OptimizedEconomy
         this.autoConvert = plugin.getConfig().getBoolean("currency-exchange.auto-convert", false);
         this.exchangeRates = plugin.getConfig().getConfigurationSection("currency-exchange.rates");
         this.onlineCacheTtlMs = plugin.getConfig().getLong("economy.cache-ttl-ms", 1000L);
+        this.formatSymbol = plugin.getConfig().getString("formatting.symbol", "$");
+        this.formatPosition = plugin.getConfig().getString("formatting.symbol-position", "AFTER");
+        this.formatUseShort = plugin.getConfig().getBoolean("formatting.use-short-format", false);
+        String decSepStr = plugin.getConfig().getString("formatting.decimal-separator", ".");
+        this.formatDecSep = (decSepStr != null && !decSepStr.isEmpty()) ? decSepStr.charAt(0) : '.';
 
         // Clean up rate limiting state and expired cache entries every 30 seconds
         this.cleanupTask = net.milkbowl.vault.util.FoliaScheduler.runTimerAsync(plugin, () -> {
@@ -884,28 +893,23 @@ public class OptimizedEconomy
     public String format(double amount) {
         if (delegate != null)
             return delegate.format(amount);
-        String symbol = plugin.getConfig().getString("formatting.symbol", "$");
-        String position = plugin.getConfig().getString("formatting.symbol-position", "AFTER");
-        boolean shortFormat = plugin.getConfig().getBoolean("formatting.use-short-format", false);
-        String decSepStr = plugin.getConfig().getString("formatting.decimal-separator", ".");
-        char decSep = (decSepStr != null && !decSepStr.isEmpty()) ? decSepStr.charAt(0) : '.';
 
-        if (shortFormat) {
+        if (formatUseShort) {
             String formatted;
             if (amount >= 1_000_000_000) {
-                formatted = String.format(java.util.Locale.US, "%.2fB", amount / 1_000_000_000.0).replace('.', decSep);
+                formatted = String.format(java.util.Locale.US, "%.2fB", amount / 1_000_000_000.0).replace('.', formatDecSep);
             } else if (amount >= 1_000_000) {
-                formatted = String.format(java.util.Locale.US, "%.2fM", amount / 1_000_000.0).replace('.', decSep);
+                formatted = String.format(java.util.Locale.US, "%.2fM", amount / 1_000_000.0).replace('.', formatDecSep);
             } else if (amount >= 1_000) {
-                formatted = String.format(java.util.Locale.US, "%.2fk", amount / 1_000.0).replace('.', decSep);
+                formatted = String.format(java.util.Locale.US, "%.2fk", amount / 1_000.0).replace('.', formatDecSep);
             } else {
                 formatted = getDecimalFormat().format(amount);
             }
-            return "BEFORE".equalsIgnoreCase(position) ? symbol + formatted : formatted + symbol;
+            return "BEFORE".equalsIgnoreCase(formatPosition) ? formatSymbol + formatted : formatted + formatSymbol;
         }
 
         String val = getDecimalFormat().format(amount);
-        return "BEFORE".equalsIgnoreCase(position) ? symbol + val : val + symbol;
+        return "BEFORE".equalsIgnoreCase(formatPosition) ? formatSymbol + val : val + formatSymbol;
     }
 
     @Override
@@ -1028,6 +1032,9 @@ public class OptimizedEconomy
     public EconomyResponse bankWithdraw(String name, double amount) {
         if (!nativeBanks && delegate != null)
             return delegate.bankWithdraw(name, amount);
+        if (Double.isNaN(amount) || Double.isInfinite(amount) || amount <= 0) {
+            return new EconomyResponse(0, getBankBalanceNative(name), EconomyResponse.ResponseType.FAILURE, "Invalid transaction amount");
+        }
         double bal = getBankBalanceNative(name);
         if (bal >= amount) {
             bal -= amount;
@@ -1054,6 +1061,9 @@ public class OptimizedEconomy
     public EconomyResponse bankDeposit(String name, double amount) {
         if (!nativeBanks && delegate != null)
             return delegate.bankDeposit(name, amount);
+        if (Double.isNaN(amount) || Double.isInfinite(amount) || amount <= 0) {
+            return new EconomyResponse(0, getBankBalanceNative(name), EconomyResponse.ResponseType.FAILURE, "Invalid transaction amount");
+        }
         double bal = getBankBalanceNative(name) + amount;
         bankBalances.put(name.toLowerCase(), bal);
         VaultRedisManager redis = VaultRedisManager.getInstance();
