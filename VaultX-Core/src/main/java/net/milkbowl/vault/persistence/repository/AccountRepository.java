@@ -166,7 +166,7 @@ public class AccountRepository {
     }
 
     public double getTotalMoneySupply(String currency) {
-        String query = "SELECT SUM(balance) FROM user_balances WHERE currency = ?";
+        String query = "SELECT SUM(balance) FROM custom_currency_balances WHERE currency = ?";
         return dbManager.executeDatabaseQuery(conn -> {
             try (PreparedStatement pstmt = conn.prepareStatement(query)) {
                 pstmt.setString(1, currency != null ? currency.toLowerCase() : "default");
@@ -179,7 +179,7 @@ public class AccountRepository {
     }
 
     public double getAverageAccountBalance(String currency) {
-        String query = "SELECT AVG(balance) FROM user_balances WHERE currency = ?";
+        String query = "SELECT AVG(balance) FROM custom_currency_balances WHERE currency = ?";
         return dbManager.executeDatabaseQuery(conn -> {
             try (PreparedStatement pstmt = conn.prepareStatement(query)) {
                 pstmt.setString(1, currency != null ? currency.toLowerCase() : "default");
@@ -335,7 +335,7 @@ public class AccountRepository {
     }
 
     public Map<UUID, Double> getTopBalances(String currency, int limit) {
-        String query = "SELECT uuid, balance FROM player_balances WHERE LOWER(currency) = LOWER(?) ORDER BY balance DESC LIMIT ?";
+        String query = "SELECT uuid, balance FROM custom_currency_balances WHERE LOWER(currency) = LOWER(?) ORDER BY balance DESC LIMIT ?";
         return dbManager.executeDatabaseQuery(conn -> {
             Map<UUID, Double> map = new LinkedHashMap<>();
             try (PreparedStatement pstmt = conn.prepareStatement(query)) {
@@ -355,7 +355,7 @@ public class AccountRepository {
 
     public int getPlayerRank(UUID uuid, String currency) {
         if (uuid == null) return -1;
-        String query = "SELECT COUNT(*) + 1 AS rank FROM player_balances WHERE LOWER(currency) = LOWER(?) AND balance > (SELECT balance FROM player_balances WHERE uuid = ? AND LOWER(currency) = LOWER(?))";
+        String query = "SELECT COUNT(*) + 1 AS rank FROM custom_currency_balances WHERE LOWER(currency) = LOWER(?) AND balance > (SELECT balance FROM custom_currency_balances WHERE uuid = ? AND LOWER(currency) = LOWER(?))";
         return dbManager.executeDatabaseQuery(conn -> {
             try (PreparedStatement pstmt = conn.prepareStatement(query)) {
                 pstmt.setString(1, currency == null ? "default" : currency);
