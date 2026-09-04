@@ -1,13 +1,11 @@
 package net.milkbowl.vault.economy;
 
-import net.milkbowl.vault.Vault;
-import net.milkbowl.vault.redis.VaultRedisManager;
+import net.milkbowl.vault.persistence.repository.ExchangeRateRepository;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
-import redis.clients.jedis.Jedis;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -17,6 +15,8 @@ public class ExchangeRateManager implements CurrencyExchangeAPI {
     private final Plugin plugin;
     private final Map<String, Double> rates = new ConcurrentHashMap<>();
     private final Map<String, Double> initialRates = new HashMap<>();
+    private final ExchangeRateRepository repository;
+    private final ForexPriceEngine priceEngine;
 
     private boolean enabled = false;
     private int updateInterval = 15;
@@ -28,6 +28,8 @@ public class ExchangeRateManager implements CurrencyExchangeAPI {
 
     public ExchangeRateManager(Plugin plugin) {
         this.plugin = plugin;
+        this.repository = new ExchangeRateRepository(plugin);
+        this.priceEngine = new ForexPriceEngine(plugin, repository);
         loadConfig();
         if (enabled) {
             loadRates();
@@ -61,58 +63,20 @@ public class ExchangeRateManager implements CurrencyExchangeAPI {
                 }
             }
         }
-        // Ensure default always exists at 1.0
         initialRates.put("default", 1.0);
         rates.put("default", 1.0);
     }
 
     private void loadRates() {
-        // 1. Load from DB
-        Map<String, Double> dbRates = Vault.getFailoverManager().getExchangeRates();
-        if (dbRates != null && !dbRates.isEmpty()) {
-            for (Map.Entry<String, Double> entry : dbRates.entrySet()) {
-                rates.put(entry.getKey().toLowerCase(), entry.getValue());
-            }
-        }
-
-        // 2. Load from Redis if online
-        VaultRedisManager redis = VaultRedisManager.getInstance();
-        if (redis != null && redis.isOnline()) {
-            try (Jedis jedis = redis.getPool().getResource()) {
-                Map<String, String> redisRates = jedis.hgetAll("vaultx:exchange_rates");
-                if (redisRates != null && !redisRates.isEmpty()) {
-                    for (Map.Entry<String, String> entry : redisRates.entrySet()) {
-                        try {
-                            rates.put(entry.getKey().toLowerCase(), Double.parseDouble(entry.getValue()));
-                        } catch (NumberFormatException ignored) {
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                plugin.getLogger().warning("[VaultX Forex] Failed to load rates from Redis: " + e.getMessage());
-            }
+        Map<String, Double> loaded = repository.loadRates();
+        if (loaded != null && !loaded.isEmpty()) {
+            rates.putAll(loaded);
         }
     }
 
     private void saveRate(String currency, double rate) {
         rates.put(currency.toLowerCase(), rate);
-
-        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
-            // Save to Local DB
-            Vault.getFailoverManager().saveExchangeRate(currency, rate);
-
-            // Save to Redis
-            VaultRedisManager redis = VaultRedisManager.getInstance();
-            if (redis != null && redis.isOnline()) {
-                try (Jedis jedis = redis.getPool().getResource()) {
-                    jedis.hset("vaultx:exchange_rates", currency.toLowerCase(), String.valueOf(rate));
-                    // Publish update channel event
-                    jedis.publish("vaultx:forex:update", currency.toLowerCase() + ":" + rate);
-                } catch (Exception e) {
-                    plugin.getLogger().warning("[VaultX Forex] Failed to save rate to Redis: " + e.getMessage());
-                }
-            }
-        });
+        repository.saveRate(currency, rate);
     }
 
     public void updateRateFromNetwork(String currency, double rate) {
@@ -135,115 +99,7 @@ public class ExchangeRateManager implements CurrencyExchangeAPI {
     private void startFluctuationScheduler() {
         long ticks = updateInterval * 60L * 20L;
         fluctuationTask = net.milkbowl.vault.util.FoliaScheduler.runTimerAsync(plugin, () -> {
-            Random rand = new Random();
-            for (String currency : rates.keySet()) {
-                if (currency.equals("default"))
-                    continue;
-
-                double currentRate = getRate(currency);
-                double pct = (rand.nextDouble() * 2.0 - 1.0) * (maxFluctuation / 100.0);
-                double newRate = currentRate * (1.0 + pct);
-
-                // Add mean reversion towards initial rate
-                double initRate = initialRates.getOrDefault(currency, 1.0);
-                double drift = (initRate - newRate) * 0.02; // Slow pull towards base price
-                newRate += drift;
-
-                // Ensure rate stays within bounds (0.01x to 100x of initial rate)
-                double minBound = initRate * 0.01;
-                double maxBound = initRate * 100.0;
-                if (newRate < minBound)
-                    newRate = minBound;
-                if (newRate > maxBound)
-                    newRate = maxBound;
-
-                saveRate(currency, newRate);
-            }
-
-            // Random Market Events (Krach boursier, Boom économique, etc.)
-            if (marketEventsEnabled && rand.nextDouble() * 100.0 < marketEventsChance) {
-                List<String> customCurrencies = new ArrayList<>();
-                for (String currency : rates.keySet()) {
-                    if (!currency.equalsIgnoreCase("default")) {
-                        customCurrencies.add(currency);
-                    }
-                }
-
-                if (!customCurrencies.isEmpty()) {
-                    String selectedCurrency = customCurrencies.get(rand.nextInt(customCurrencies.size()));
-                    double currentRate = getRate(selectedCurrency);
-                    double initRate = initialRates.getOrDefault(selectedCurrency, 1.0);
-
-                    boolean isBoom = rand.nextBoolean();
-                    double changePercent;
-                    double newRate;
-                    String eventMessage;
-
-                    if (isBoom) {
-                        changePercent = 10.0 + rand.nextDouble() * 15.0; // +10% to +25%
-                        newRate = currentRate * (1.0 + changePercent / 100.0);
-
-                        String[] positiveTemplates = {
-                                Vault.getMessage("forex.event.boom-1", "Economic boom on %currency% (+%change%%)!"),
-                                Vault.getMessage("forex.event.boom-2", "Exchange rates soaring on %currency% (+%change%%)!"),
-                                Vault.getMessage("forex.event.boom-3", "Massive positive speculation on %currency% (+%change%%)!")
-                        };
-                        String rawTemplate = positiveTemplates[rand.nextInt(positiveTemplates.length)];
-                        eventMessage = rawTemplate
-                                .replace("%currency%",
-                                        selectedCurrency.substring(0, 1).toUpperCase() + selectedCurrency.substring(1))
-                                .replace("%change%", String.format("%.1f", changePercent));
-                    } else {
-                        changePercent = 10.0 + rand.nextDouble() * 15.0; // -10% to -25%
-                        newRate = currentRate * (1.0 - changePercent / 100.0);
-
-                        String[] negativeTemplates = {
-                                Vault.getMessage("forex.event.krach-1", "Market crash on %currency% (-%change%%)!"),
-                                Vault.getMessage("forex.event.krach-2", "Sudden recession on %currency% (-%change%%)!"),
-                                Vault.getMessage("forex.event.krach-3", "Panic selling on %currency% (-%change%%)!")
-                        };
-                        String rawTemplate = negativeTemplates[rand.nextInt(negativeTemplates.length)];
-                        eventMessage = rawTemplate
-                                .replace("%currency%",
-                                        selectedCurrency.substring(0, 1).toUpperCase() + selectedCurrency.substring(1))
-                                .replace("%change%", String.format("%.1f", changePercent));
-                    }
-
-                    double minBound = initRate * 0.01;
-                    double maxBound = initRate * 100.0;
-                    if (newRate < minBound)
-                        newRate = minBound;
-                    if (newRate > maxBound)
-                        newRate = maxBound;
-
-                    saveRate(selectedCurrency, newRate);
-
-                    // Send Discord webhook alert asynchronously
-                    net.milkbowl.vault.security.TransactionFirewall firewall = net.milkbowl.vault.Vault.getFirewall();
-                    if (firewall != null && firewall.getWebhookNotifier() != null) {
-                        firewall.getWebhookNotifier().sendAlertAsync("FOREX_MARKET_EVENT", null, eventMessage, isBoom ? 3066993 : 15158332);
-                    }
-
-                    // Broadcast alert and play sounds on Main Thread
-                    net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
-                        String prefix = Vault.getMessage("forex.broadcast-prefix", "&6&l[VaultX Forex] &e📢 ÉVÉNEMENT BOURSIER : ");
-                        String colorCode = isBoom ? "§a" : "§c";
-                        String announcement = prefix + colorCode + eventMessage;
-
-                        Bukkit.broadcastMessage(announcement);
-
-                        for (Player p : Bukkit.getOnlinePlayers()) {
-                            if (isBoom) {
-                                net.milkbowl.vault.util.VaultXVisuals.playSuccessSound(p);
-                            } else {
-                                net.milkbowl.vault.util.VaultXVisuals.playFailureSound(p);
-                            }
-                        }
-                    });
-                }
-            }
-
-            plugin.getLogger().info("[VaultX Forex] Exchange rates fluctuated dynamically.");
+            priceEngine.fluctuateRates(rates, initialRates, maxFluctuation, marketEventsEnabled, marketEventsChance);
         }, ticks, ticks);
     }
 
@@ -282,11 +138,9 @@ public class ExchangeRateManager implements CurrencyExchangeAPI {
         }
         Economy econ = rsp.getProvider();
 
-        // 1. Get rates
-        double fromRate = getRate(from); // value in default currency
-        double toRate = getRate(to); // value in default currency
+        double fromRate = getRate(from);
+        double toRate = getRate(to);
 
-        // 2. Validate player has enough fromCurrency
         double playerFromBal = 0;
         if (from.equals("default")) {
             playerFromBal = econ.getBalance(player);
@@ -299,10 +153,8 @@ public class ExchangeRateManager implements CurrencyExchangeAPI {
                     playerFromBal, 0);
         }
 
-        // 3. Calculate value in default currency
         double defaultVal = amount * fromRate;
 
-        // Apply Exchange Tax (configured in central-bank.taxes)
         double tax = 0.0;
         boolean taxesEnabled = plugin.getConfig().getBoolean("central-bank.taxes.enabled", false);
         double taxPct = plugin.getConfig().getDouble("central-bank.taxes.exchange-tax-percent", 1.0);
@@ -311,10 +163,8 @@ public class ExchangeRateManager implements CurrencyExchangeAPI {
             defaultVal -= tax;
         }
 
-        // Convert to target currency
         double targetVal = defaultVal / toRate;
 
-        // 4. Perform withdrawals & deposits
         EconomyResponse wRes;
         if (from.equals("default")) {
             wRes = econ.withdrawPlayer(player, amount);
@@ -328,14 +178,12 @@ public class ExchangeRateManager implements CurrencyExchangeAPI {
             return new ConversionResult(false, "Withdrawal failed: " + wRes.errorMessage, 0, playerFromBal, 0);
         }
 
-        // Deposit target currency
         EconomyResponse dRes;
         if (to.equals("default")) {
             dRes = econ.depositPlayer(player, targetVal);
         } else if (econ instanceof MultiCurrencyEconomy) {
             dRes = ((MultiCurrencyEconomy) econ).depositCurrencyPlayer(player, to, targetVal);
         } else {
-            // Rollback withdrawal
             if (from.equals("default")) {
                 econ.depositPlayer(player, amount);
             } else {
@@ -345,7 +193,6 @@ public class ExchangeRateManager implements CurrencyExchangeAPI {
         }
 
         if (!dRes.transactionSuccess()) {
-            // Rollback withdrawal
             if (from.equals("default")) {
                 econ.depositPlayer(player, amount);
             } else {
@@ -354,14 +201,11 @@ public class ExchangeRateManager implements CurrencyExchangeAPI {
             return new ConversionResult(false, "Deposit failed: " + dRes.errorMessage, 0, playerFromBal, 0);
         }
 
-        // Deposit taxes to Treasury if enabled
         if (tax > 0) {
             String treasury = plugin.getConfig().getString("central-bank.taxes.treasury-account", "tresor_public");
             econ.bankDeposit(treasury, tax);
         }
 
-        // 5. Apply Supply & Demand rate adjustment
-        // Sell from -> price of from goes down
         if (!from.equals("default")) {
             double current = getRate(from);
             double reduction = current * (amount * demandFactor / 100.0);
@@ -369,7 +213,6 @@ public class ExchangeRateManager implements CurrencyExchangeAPI {
             saveRate(from, newRate);
         }
 
-        // Buy to -> price of to goes up
         if (!to.equals("default")) {
             double current = getRate(to);
             double increase = current * (targetVal * demandFactor / 100.0);
@@ -410,4 +253,3 @@ public class ExchangeRateManager implements CurrencyExchangeAPI {
         return Collections.unmodifiableMap(new HashMap<>(rates));
     }
 }
-

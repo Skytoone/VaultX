@@ -1,5 +1,6 @@
 package net.milkbowl.vault.util;
 
+import net.milkbowl.vault.persistence.repository.UUIDCacheRepository;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
@@ -19,7 +20,7 @@ public class UUIDCache implements Listener {
     private static final Map<String, Long> negativeCache = new ConcurrentHashMap<>();
     private static final java.util.Queue<String> accessOrderNameQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
     private static final java.util.Queue<UUID> accessOrderUuidQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
-    private static final long NEGATIVE_CACHE_EXPIRATION_MS = 300000; // 5 minutes
+    private static final long NEGATIVE_CACHE_EXPIRATION_MS = 300000;
     private static final int MAX_NEGATIVE_CACHE_SIZE = 2000;
     private static boolean enabled = false;
 
@@ -82,7 +83,6 @@ public class UUIDCache implements Listener {
             registeredListenerInstance = new UUIDCache();
             Bukkit.getPluginManager().registerEvents(registeredListenerInstance, plugin);
             preload(plugin);
-            // Schedule periodic cleanup for expired negativeCache entries (every 5 minutes = 6000 ticks)
             cleanupTask = net.milkbowl.vault.util.FoliaScheduler.runTimerAsync(plugin, () -> {
                 long now = System.currentTimeMillis();
                 negativeCache.values().removeIf(expiry -> expiry != null && now > expiry);
@@ -112,66 +112,7 @@ public class UUIDCache implements Listener {
 
     public static void preload(Plugin plugin) {
         if (!enabled) return;
-        boolean preloadEnabled = plugin.getConfig().getBoolean("advanced.preload-offline-players", true);
-        if (!preloadEnabled) return;
-
-        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, new Runnable() {
-            @Override
-            public void run() {
-                plugin.getLogger().info("[UUIDCache] Starting async pre-loading of offline players...");
-                long start = System.currentTimeMillis();
-                int count = 0;
-                boolean loadedFromUserCache = false;
-                
-                java.io.File userCacheFile = new java.io.File("usercache.json");
-                if (userCacheFile.exists()) {
-                    try {
-                        byte[] bytes = java.nio.file.Files.readAllBytes(userCacheFile.toPath());
-                        String content = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
-                        org.json.JSONArray array = new org.json.JSONArray(content);
-                        for (int i = 0; i < array.length(); i++) {
-                            org.json.JSONObject obj = array.getJSONObject(i);
-                            if (obj.has("name") && obj.has("uuid")) {
-                                String name = obj.getString("name");
-                                String uuidStr = obj.getString("uuid");
-                                try {
-                                    UUID uuid = UUID.fromString(uuidStr);
-                                    putCache(name, uuid);
-                                    count++;
-                                } catch (IllegalArgumentException e) {}
-                            }
-                        }
-                        loadedFromUserCache = true;
-                        long end = System.currentTimeMillis();
-                        plugin.getLogger().info("[UUIDCache] Fast pre-loaded " + count + " offline players from usercache.json in " + (end - start) + "ms.");
-                    } catch (Exception e) {
-                        plugin.getLogger().warning("[UUIDCache] Failed to parse usercache.json, falling back to Bukkit: " + e.getMessage());
-                    }
-                }
-
-                if (!loadedFromUserCache) {
-                    try {
-                        OfflinePlayer[] offlinePlayers = Bukkit.getOfflinePlayers();
-                        if (offlinePlayers != null) {
-                            for (OfflinePlayer op : offlinePlayers) {
-                                if (op != null) {
-                                    String name = op.getName();
-                                    UUID uuid = op.getUniqueId();
-                                    if (name != null && uuid != null) {
-                                        putCache(name, uuid);
-                                        count++;
-                                    }
-                                }
-                            }
-                        }
-                        long end = System.currentTimeMillis();
-                        plugin.getLogger().info("[UUIDCache] Pre-loaded " + count + " offline players in " + (end - start) + "ms.");
-                    } catch (Exception e) {
-                        plugin.getLogger().warning("[UUIDCache] Error pre-loading offline players: " + e.getMessage());
-                    }
-                }
-            }
-        });
+        MojangResolver.preloadUserCache(plugin, UUIDCache::putCache);
     }
 
     public static boolean isEnabled() {
@@ -186,10 +127,7 @@ public class UUIDCache implements Listener {
         if (name != null) {
             negativeCache.remove(name.toLowerCase());
             putCache(name, uuid);
-            net.milkbowl.vault.redis.LocalFailoverManager fm = net.milkbowl.vault.Vault.getFailoverManager();
-            if (fm != null) {
-                fm.saveUuidCache(name, uuid);
-            }
+            UUIDCacheRepository.saveUuidCache(name, uuid);
         }
     }
 
@@ -215,16 +153,7 @@ public class UUIDCache implements Listener {
                     try {
                         String dbName = null;
                         if (enabled) {
-                            net.milkbowl.vault.redis.LocalFailoverManager fm = net.milkbowl.vault.Vault.getFailoverManager();
-                            if (fm != null) {
-                                dbName = fm.getNameFromCache(uuid);
-                            }
-                            if (dbName == null) {
-                                net.milkbowl.vault.redis.VaultRedisManager redis = net.milkbowl.vault.redis.VaultRedisManager.getInstance();
-                                if (redis != null && redis.isOnline()) {
-                                    dbName = redis.getNameFromRedis(uuid);
-                                }
-                            }
+                            dbName = UUIDCacheRepository.getNameFromDbOrRedis(uuid);
                         }
                         if (dbName != null) {
                             putCache(dbName, uuid);
@@ -235,35 +164,17 @@ public class UUIDCache implements Listener {
             return null;
         } else {
             if (enabled) {
-                net.milkbowl.vault.redis.LocalFailoverManager fm = net.milkbowl.vault.Vault.getFailoverManager();
-                if (fm != null) {
-                    String dbName = fm.getNameFromCache(uuid);
-                    if (dbName != null) {
-                        putCache(dbName, uuid);
-                        return dbName;
-                    }
-                }
-                net.milkbowl.vault.redis.VaultRedisManager redis = net.milkbowl.vault.redis.VaultRedisManager.getInstance();
-                if (redis != null && redis.isOnline()) {
-                    String dbName = redis.getNameFromRedis(uuid);
-                    if (dbName != null) {
-                        putCache(dbName, uuid);
-                        net.milkbowl.vault.redis.LocalFailoverManager fm2 = net.milkbowl.vault.Vault.getFailoverManager();
-                        if (fm2 != null) {
-                            fm2.saveUuidCache(dbName, uuid);
-                        }
-                        return dbName;
-                    }
+                String dbName = UUIDCacheRepository.getNameFromDbOrRedis(uuid);
+                if (dbName != null) {
+                    putCache(dbName, uuid);
+                    return dbName;
                 }
             }
             OfflinePlayer op = Bukkit.getOfflinePlayer(uuid);
             if (op != null && op.getName() != null) {
                 if (enabled) {
                     putCache(op.getName(), uuid);
-                    net.milkbowl.vault.redis.LocalFailoverManager fm = net.milkbowl.vault.Vault.getFailoverManager();
-                    if (fm != null) {
-                        fm.saveUuidCache(op.getName(), uuid);
-                    }
+                    UUIDCacheRepository.saveUuidCache(op.getName(), uuid);
                 }
                 return op.getName();
             }
@@ -320,7 +231,6 @@ public class UUIDCache implements Listener {
                 return Bukkit.getOfflinePlayer(cached);
             }
             
-            // Try resolving via Bukkit's user cache without blocking
             OfflinePlayer cachedPlayer = getOfflinePlayerIfCached(name);
             if (cachedPlayer != null && cachedPlayer.getUniqueId() != null && cachedPlayer.getName() != null) {
                 putCache(cachedPlayer.getName(), cachedPlayer.getUniqueId());
@@ -334,15 +244,8 @@ public class UUIDCache implements Listener {
                 net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
                     try {
                         UUID dbUuid = null;
-                        net.milkbowl.vault.redis.LocalFailoverManager fm = net.milkbowl.vault.Vault.getFailoverManager();
-                        if (enabled && fm != null) {
-                            dbUuid = fm.getUuidFromCache(name);
-                        }
-                        if (enabled && dbUuid == null) {
-                            net.milkbowl.vault.redis.VaultRedisManager redis = net.milkbowl.vault.redis.VaultRedisManager.getInstance();
-                            if (redis != null && redis.isOnline()) {
-                                dbUuid = redis.getUuidFromRedis(name);
-                            }
+                        if (enabled) {
+                            dbUuid = UUIDCacheRepository.getUuidFromDbOrRedis(name);
                         }
                         if (dbUuid != null) {
                             if (enabled) {
@@ -353,9 +256,7 @@ public class UUIDCache implements Listener {
                             if (op != null && op.getUniqueId() != null && op.getName() != null && (op.hasPlayedBefore() || op.isOnline())) {
                                 if (enabled) {
                                     putCache(op.getName(), op.getUniqueId());
-                                    if (fm != null) {
-                                        fm.saveUuidCache(op.getName(), op.getUniqueId());
-                                    }
+                                    UUIDCacheRepository.saveUuidCache(op.getName(), op.getUniqueId());
                                 }
                             } else {
                                 if (enabled) {
@@ -366,38 +267,20 @@ public class UUIDCache implements Listener {
                     } catch (Exception ignored) {}
                 });
             }
-            return null; // Return null to prevent main thread lag for cold fetch
+            return null;
         } else {
             if (enabled) {
-                net.milkbowl.vault.redis.LocalFailoverManager fm = net.milkbowl.vault.Vault.getFailoverManager();
-                if (fm != null) {
-                    UUID dbUuid = fm.getUuidFromCache(name);
-                    if (dbUuid != null) {
-                        putCache(name, dbUuid);
-                        return Bukkit.getOfflinePlayer(dbUuid);
-                    }
-                }
-                net.milkbowl.vault.redis.VaultRedisManager redis = net.milkbowl.vault.redis.VaultRedisManager.getInstance();
-                if (redis != null && redis.isOnline()) {
-                    UUID dbUuid = redis.getUuidFromRedis(name);
-                    if (dbUuid != null) {
-                        putCache(name, dbUuid);
-                        net.milkbowl.vault.redis.LocalFailoverManager fm2 = net.milkbowl.vault.Vault.getFailoverManager();
-                        if (fm2 != null) {
-                            fm2.saveUuidCache(name, dbUuid);
-                        }
-                        return Bukkit.getOfflinePlayer(dbUuid);
-                    }
+                UUID dbUuid = UUIDCacheRepository.getUuidFromDbOrRedis(name);
+                if (dbUuid != null) {
+                    putCache(name, dbUuid);
+                    return Bukkit.getOfflinePlayer(dbUuid);
                 }
             }
             OfflinePlayer op = Bukkit.getOfflinePlayer(name);
             if (op != null && op.getUniqueId() != null && op.getName() != null && (op.hasPlayedBefore() || op.isOnline())) {
                 if (enabled) {
                     putCache(op.getName(), op.getUniqueId());
-                    net.milkbowl.vault.redis.LocalFailoverManager fm = net.milkbowl.vault.Vault.getFailoverManager();
-                    if (fm != null) {
-                        fm.saveUuidCache(op.getName(), op.getUniqueId());
-                    }
+                    UUIDCacheRepository.saveUuidCache(op.getName(), op.getUniqueId());
                 }
                 return op;
             } else {

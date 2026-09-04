@@ -6,6 +6,8 @@ import java.io.File;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.ChatColor;
 
+import net.milkbowl.vault.bootstrap.ServiceRegistry;
+import net.milkbowl.vault.bootstrap.PluginBootstrap;
 import net.milkbowl.vault.chat.Chat;
 import net.milkbowl.vault.economy.Economy;
 import net.milkbowl.vault.economy.MultiCurrencyEconomy;
@@ -35,425 +37,219 @@ public class Vault extends JavaPlugin {
     private static YamlConfiguration gui;
     private Permission perms;
     private ServicesManager sm;
-    private static net.milkbowl.vault.security.TransactionFirewall firewall;
-    private static net.milkbowl.vault.redis.LocalFailoverManager failoverManager;
-    private static net.milkbowl.vault.redis.EscrowManager escrowManager;
-    private static net.milkbowl.vault.economy.ExchangeRateManager exchangeRateManager;
-    private static net.milkbowl.vault.economy.CentralBankManager centralBankManager;
-    private static net.milkbowl.vault.economy.MailboxManager mailboxManager;
-    private static net.milkbowl.vault.util.VaultXGUI vaultXGUI;
-    private static net.milkbowl.vault.economy.StockExchangeManager stockExchangeManager;
-    private static net.milkbowl.vault.economy.LoanManager loanManager;
-    private static net.milkbowl.vault.economy.PaydayManager paydayManager;
-    private static net.milkbowl.vault.economy.SubscriptionManager subscriptionManager;
-    private static net.milkbowl.vault.economy.DynamicPricingManager dynamicPricingManager;
-    private static net.milkbowl.vault.discord.DiscordManager discordManager;
-    private static net.milkbowl.vault.integration.TownyLandsFactionsHook townyLandsFactionsHook;
-    private static net.milkbowl.vault.economy.BlackMarketManager blackMarketManager;
-    private static net.milkbowl.vault.economy.BankBackupManager bankBackupManager;
+    private static final ServiceRegistry serviceRegistry = new ServiceRegistry();
+    private PluginBootstrap bootstrap;
+
+    public static ServiceRegistry getServiceRegistry() {
+        return serviceRegistry;
+    }
 
     public static net.milkbowl.vault.economy.BankBackupManager getBankBackupManager() {
-        return bankBackupManager;
+        return serviceRegistry.getBankBackupManager();
     }
 
     public static net.milkbowl.vault.discord.DiscordManager getDiscordManager() {
-        return discordManager;
+        return serviceRegistry.getDiscordManager();
     }
 
     public static net.milkbowl.vault.integration.TownyLandsFactionsHook getTownyLandsFactionsHook() {
-        return townyLandsFactionsHook;
+        return serviceRegistry.getTownyLandsFactionsHook();
     }
 
     public static net.milkbowl.vault.economy.BlackMarketManager getBlackMarketManager() {
-        return blackMarketManager;
+        return serviceRegistry.getBlackMarketManager();
     }
 
     public static net.milkbowl.vault.economy.DynamicPricingManager getDynamicPricingManager() {
-        return dynamicPricingManager;
+        return serviceRegistry.getDynamicPricingManager();
     }
 
     public static net.milkbowl.vault.economy.SubscriptionManager getSubscriptionManager() {
-        return subscriptionManager;
+        return serviceRegistry.getSubscriptionManager();
     }
 
     public static net.milkbowl.vault.economy.PaydayManager getPaydayManager() {
-        return paydayManager;
+        return serviceRegistry.getPaydayManager();
     }
 
     public static net.milkbowl.vault.security.TransactionFirewall getFirewall() {
-        return firewall;
+        return serviceRegistry.getFirewall();
     }
 
     public static net.milkbowl.vault.redis.LocalFailoverManager getFailoverManager() {
-        return failoverManager;
+        return serviceRegistry.getFailoverManager();
     }
 
     public static net.milkbowl.vault.redis.EscrowManager getEscrowManager() {
-        return escrowManager;
+        return serviceRegistry.getEscrowManager();
     }
 
     public static net.milkbowl.vault.economy.CurrencyExchangeAPI getCurrencyExchangeAPI() {
-        return exchangeRateManager;
+        return serviceRegistry.getCurrencyExchangeAPI();
     }
 
     public static net.milkbowl.vault.economy.ExchangeRateManager getExchangeRateManager() {
-        return exchangeRateManager;
+        return serviceRegistry.getExchangeRateManager();
     }
 
     public static net.milkbowl.vault.economy.CentralBankManager getCentralBankManager() {
-        return centralBankManager;
+        return serviceRegistry.getCentralBankManager();
     }
 
     public static net.milkbowl.vault.economy.MailboxManager getMailboxManager() {
-        return mailboxManager;
+        return serviceRegistry.getMailboxManager();
     }
 
     public static net.milkbowl.vault.util.VaultXGUI getVaultXGUI() {
-        return vaultXGUI;
+        return serviceRegistry.getVaultXGUI();
     }
 
     public static net.milkbowl.vault.economy.StockExchangeManager getStockExchangeManager() {
-        return stockExchangeManager;
+        return serviceRegistry.getStockExchangeManager();
     }
 
     public static net.milkbowl.vault.economy.LoanManager getLoanManager() {
-        return loanManager;
+        return serviceRegistry.getLoanManager();
     }
 
     public static java.util.List<OptimizedEconomy> getWrappedEconomies() {
-        return wrappedEconomies;
+        return serviceRegistry.getWrappedEconomies();
     }
 
     public static net.milkbowl.vault.economy.VaultLeaderboardAPI getLeaderboardAPI() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0) : null;
     }
 
     public static net.milkbowl.vault.economy.VaultBatchTransactionAPI getBatchTransactionAPI() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0) : null;
     }
 
     public static net.milkbowl.vault.economy.VaultFormatAPI getFormatAPI() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0) : null;
     }
 
     public static net.milkbowl.vault.economy.VaultMailboxAPI getMailboxAPI() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0) : null;
     }
 
     public static net.milkbowl.vault.economy.VaultEscrowAPI getEscrowAPI() {
-        return escrowManager;
+        return serviceRegistry.getEscrowManager();
     }
 
     public static net.milkbowl.vault.economy.VaultFirewallAPI getFirewallAPI() {
-        return firewall;
+        return serviceRegistry.getFirewall();
     }
 
     public static net.milkbowl.vault.economy.VaultBlackMarketAPI getBlackMarketAPI() {
-        return blackMarketManager;
+        return serviceRegistry.getBlackMarketManager();
     }
 
     public static net.milkbowl.vault.economy.VaultStockAPI getStockAPI() {
-        return stockExchangeManager;
+        return serviceRegistry.getStockExchangeManager();
     }
 
     public static net.milkbowl.vault.economy.VaultBoosterAPI getBoosterAPI() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0) : null;
     }
 
     public static net.milkbowl.vault.economy.VaultAnalyticsAPI getAnalyticsAPI() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0) : null;
     }
 
     public static net.milkbowl.vault.economy.VaultCurrencyRegistry getCurrencyRegistry() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0) : null;
     }
 
     public static net.milkbowl.vault.economy.VaultSnapshotAPI getSnapshotAPI() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0) : null;
     }
 
     public static net.milkbowl.vault.economy.VaultAuditAPI getAuditAPI() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0) : null;
     }
 
     public static net.milkbowl.vault.economy.CryptoManager getCryptoManager() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0).getCryptoManager() : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0).getCryptoManager() : null;
     }
 
     public static net.milkbowl.vault.economy.AuctionManager getAuctionManager() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0).getAuctionManager() : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0).getAuctionManager() : null;
     }
 
     public static net.milkbowl.vault.economy.StakingManager getStakingManager() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0).getStakingManager() : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0).getStakingManager() : null;
     }
 
     public static net.milkbowl.vault.economy.CreditManager getCreditManager() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0).getCreditManager() : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0).getCreditManager() : null;
     }
 
     public static net.milkbowl.vault.economy.VaultMultiSigAPI getMultiSigAPI() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0) : null;
     }
 
     public static net.milkbowl.vault.economy.VaultAMMExchangeAPI getAMMExchangeAPI() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0) : null;
     }
 
     public static net.milkbowl.vault.economy.VaultSmartContractAPI getSmartContractAPI() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0) : null;
     }
 
     public static net.milkbowl.vault.economy.VaultStandingOrderAPI getStandingOrderAPI() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0) : null;
     }
 
     public static net.milkbowl.vault.economy.VaultCashbackLoyaltyAPI getCashbackLoyaltyAPI() {
-        return !wrappedEconomies.isEmpty() ? wrappedEconomies.get(0) : null;
+        return !serviceRegistry.getWrappedEconomies().isEmpty() ? serviceRegistry.getWrappedEconomies().get(0) : null;
     }
 
     @Override
     public void onDisable() {
-        // Shutdown registered OptimizedEconomy thread pools and clear caches
-        for (OptimizedEconomy econ : wrappedEconomies) {
-            try {
-                econ.shutdown();
-            } catch (Exception e) {
-                getLogger().warning("[Vault] Exception shutting down OptimizedEconomy: " + e.getMessage());
-            }
-        }
-        wrappedEconomies.clear();
-
-        // Close GUI listener & maps
-        if (vaultXGUI != null) {
-            try {
-                vaultXGUI.close();
-            } catch (Exception e) {
-                getLogger().warning("[Vault] Exception closing VaultXGUI: " + e.getMessage());
-            }
-        }
-
-        // Clean up static UUIDCache
-        net.milkbowl.vault.util.UUIDCache.cleanup();
-
-        // Unregister all plugin event listeners
         org.bukkit.event.HandlerList.unregisterAll(this);
-
-        // Remove all Service Registrations
-        getServer().getServicesManager().unregisterAll(this);
-        net.milkbowl.vault.util.FoliaScheduler.cancelTasks(this);
-
-        // Close Redis Manager
-        if (net.milkbowl.vault.redis.VaultRedisManager.getInstance() != null) {
-            net.milkbowl.vault.redis.VaultRedisManager.getInstance().close();
-        }
-
-        // Close Postgres Manager
-        if (net.milkbowl.vault.redis.VaultPostgresManager.getInstance() != null) {
-            net.milkbowl.vault.redis.VaultPostgresManager.getInstance().close();
-        }
-
-        // Close Escrow Manager
-        if (escrowManager != null) {
-            escrowManager.close();
-        }
-
-        // Close Exchange Rate Manager
-        if (exchangeRateManager != null) {
-            exchangeRateManager.close();
-        }
-
-        // Close Subscription Manager
-        if (subscriptionManager != null) {
-            subscriptionManager.close();
-        }
-
-        // Close Dynamic Pricing Manager
-        if (dynamicPricingManager != null) {
-            dynamicPricingManager.close();
-        }
-
-        // Close Discord Manager
-        if (discordManager != null) {
-            discordManager.close();
-        }
-
-        // Close Central Bank Manager
-        if (centralBankManager != null) {
-            centralBankManager.close();
-        }
-
-        // Close Payday Manager
-        if (paydayManager != null) {
-            paydayManager.close();
-        }
-
-        // Close Black Market Manager
-        if (blackMarketManager != null) {
-            blackMarketManager.close();
-        }
-
-        // Close Stock Exchange Manager
-        if (stockExchangeManager != null) {
-            stockExchangeManager.close();
-        }
-
-        // Close Loan Manager
-        if (loanManager != null) {
-            loanManager.close();
-        }
-
-        // Close Bank Backup Manager
-        if (bankBackupManager != null) {
-            bankBackupManager.close();
-        }
-
-        // Close Local Failover SQLite Manager
-        if (failoverManager != null) {
-            failoverManager.close();
-        }
-
-        // Close Transaction Firewall
-        if (firewall != null) {
-            try {
-                firewall.close();
-            } catch (Exception e) {
-                getLogger().warning("[Vault] Exception closing TransactionFirewall: " + e.getMessage());
-            }
-        }
-
-        // Clear physical economy listener static checks cache
-        net.milkbowl.vault.listener.PhysicalEconomyListener.cleanup();
-        net.milkbowl.vault.util.UUIDCache.cleanup();
-
-        // Reset all static references to null to prevent memory retention or stale access on plugin disable
-        vaultXGUI = null;
-        firewall = null;
-        failoverManager = null;
-        escrowManager = null;
-        exchangeRateManager = null;
-        centralBankManager = null;
-        mailboxManager = null;
-        stockExchangeManager = null;
-        loanManager = null;
-        paydayManager = null;
-        subscriptionManager = null;
-        dynamicPricingManager = null;
-        discordManager = null;
-        townyLandsFactionsHook = null;
-        blackMarketManager = null;
-        bankBackupManager = null;
+        serviceRegistry.shutdownAll(this);
         messages = null;
         gui = null;
     }
 
     @Override
     public void onEnable() {
-        // Migrate data folder from VaultX to Vault if necessary
-        File vaultFolder = getDataFolder();
-        if (!vaultFolder.exists()) {
-            File vaultXFolder = new File(vaultFolder.getParentFile(), "VaultX");
-            if (vaultXFolder.exists()) {
-                getLogger().info("Found existing VaultX configuration folder. Migrating to Vault...");
-                if (vaultXFolder.renameTo(vaultFolder)) {
-                    getLogger().info("VaultX configuration folder successfully migrated to Vault.");
-                } else {
-                    getLogger().warning("Failed to migrate VaultX configuration folder to Vault.");
-                }
-            }
-        }
+        bootstrap = new PluginBootstrap(this);
+        bootstrap.initializeConfig();
 
         loadMessagesConfig();
         loadGuiConfig();
         sm = getServer().getServicesManager();
 
-        // Auto-update config file preserving comments
-        File configFile = new File(getDataFolder(), "config.yml");
-        if (configFile.exists()) {
-            try {
-                net.milkbowl.vault.util.ConfigUpdater.updateConfig(configFile, getResource("config.yml"));
-            } catch (Exception e) {
-                getLogger().warning("Could not auto-update config.yml: " + e.getMessage());
-            }
-            reloadConfig();
-        } else {
-            saveDefaultConfig();
-        }
+        bootstrap.checkUpdates();
 
-        // Update Checker
-        if (getConfig().getBoolean("settings.check-updates", true)) {
-            new net.milkbowl.vault.util.UpdateChecker(this, 135253).getVersion(version -> {
-                if (isNewerVersion(getDescription().getVersion(), version)) {
-                    getLogger().warning("A new update is available (" + version
-                            + ")! Download it here: https://www.spigotmc.org/resources/vaultx.135253/");
-                } else {
-                    getLogger().info("The plugin is up to date.");
-                }
-            });
-        }
+        // Initialize Failover Manager & baseline managers
+        serviceRegistry.setFailoverManager(new net.milkbowl.vault.redis.LocalFailoverManager(this));
+        serviceRegistry.setEscrowManager(new net.milkbowl.vault.redis.EscrowManager(this));
+        serviceRegistry.setExchangeRateManager(new net.milkbowl.vault.economy.ExchangeRateManager(this));
 
-        // Initialize Failover Manager (SQLite)
-        failoverManager = new net.milkbowl.vault.redis.LocalFailoverManager(this);
-        escrowManager = new net.milkbowl.vault.redis.EscrowManager(this);
-        exchangeRateManager = new net.milkbowl.vault.economy.ExchangeRateManager(this);
-        if (sm != null && exchangeRateManager != null) {
-            sm.register(net.milkbowl.vault.economy.CurrencyExchangeAPI.class, exchangeRateManager, this, ServicePriority.Normal);
-        }
-        if (sm != null && wrappedEconomies != null && !wrappedEconomies.isEmpty()) {
-            OptimizedEconomy primaryEcon = wrappedEconomies.get(0);
-            sm.register(net.milkbowl.vault.economy.VaultLeaderboardAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultBatchTransactionAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultFormatAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultMailboxAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultBoosterAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultLockAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultSubscriptionAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultAnalyticsAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultCurrencyRegistry.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultAuditAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultCheckAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultLoanAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultInflationAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultMilestoneAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultCryptoAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultSnapshotAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultAsyncEconomy.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultMultiSigAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultAMMExchangeAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultSmartContractAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultStandingOrderAPI.class, primaryEcon, this, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultCashbackLoyaltyAPI.class, primaryEcon, this, ServicePriority.Normal);
-        }
+        serviceRegistry.setCentralBankManager(new net.milkbowl.vault.economy.CentralBankManager(this, serviceRegistry.getExchangeRateManager()));
+        serviceRegistry.setMailboxManager(new net.milkbowl.vault.economy.MailboxManager(this));
+        serviceRegistry.setVaultXGUI(new net.milkbowl.vault.util.VaultXGUI(this));
 
-        // Register PlaceholderAPI expansion if present
-        if (getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) {
-            try {
-                new net.milkbowl.vault.integration.VaultXExpansion(this).register();
-                getLogger().info("[VaultX] Successfully registered PlaceholderAPI expansion.");
-            } catch (Throwable e) {
-                getLogger().warning("[VaultX] Could not register PlaceholderAPI expansion: " + e.getMessage());
-            }
-        }
-        centralBankManager = new net.milkbowl.vault.economy.CentralBankManager(this, exchangeRateManager);
-        mailboxManager = new net.milkbowl.vault.economy.MailboxManager(this);
-        vaultXGUI = new net.milkbowl.vault.util.VaultXGUI(this);
         if (getConfig().getBoolean("stocks.enabled", true)) {
-            stockExchangeManager = new net.milkbowl.vault.economy.StockExchangeManager(this);
+            serviceRegistry.setStockExchangeManager(new net.milkbowl.vault.economy.StockExchangeManager(this));
         }
-        loanManager = new net.milkbowl.vault.economy.LoanManager(this);
-        subscriptionManager = new net.milkbowl.vault.economy.SubscriptionManager(this);
-        dynamicPricingManager = new net.milkbowl.vault.economy.DynamicPricingManager(this);
-        discordManager = new net.milkbowl.vault.discord.DiscordManager(this);
-        townyLandsFactionsHook = new net.milkbowl.vault.integration.TownyLandsFactionsHook(this);
-        blackMarketManager = new net.milkbowl.vault.economy.BlackMarketManager(this);
+        serviceRegistry.setLoanManager(new net.milkbowl.vault.economy.LoanManager(this));
+        serviceRegistry.setSubscriptionManager(new net.milkbowl.vault.economy.SubscriptionManager(this));
+        serviceRegistry.setDynamicPricingManager(new net.milkbowl.vault.economy.DynamicPricingManager(this));
+        serviceRegistry.setDiscordManager(new net.milkbowl.vault.discord.DiscordManager(this));
+        serviceRegistry.setTownyLandsFactionsHook(new net.milkbowl.vault.integration.TownyLandsFactionsHook(this));
+        serviceRegistry.setBlackMarketManager(new net.milkbowl.vault.economy.BlackMarketManager(this));
 
+        bootstrap.registerServices(serviceRegistry);
 
-        // Schedule Hourly Analytics Aggregation Task (runs every hour = 72000 ticks)
+        // Schedule Hourly Analytics Aggregation Task
         net.milkbowl.vault.util.FoliaScheduler.runTimerAsync(this, () -> {
-            if (failoverManager != null) {
-                failoverManager.runAnalyticsAggregation();
+            if (serviceRegistry.getFailoverManager() != null) {
+                serviceRegistry.getFailoverManager().runAnalyticsAggregation();
             }
-        }, 1200L, 72000L); // 1 minute delay, 1 hour interval
+        }, 1200L, 72000L);
 
         // Register Backup Perms (SuperPerms)
         this.perms = new Permission_SuperPerms(this);
@@ -468,12 +264,10 @@ public class Vault extends JavaPlugin {
             net.milkbowl.vault.command.VaultXCommand vxCmd = new net.milkbowl.vault.command.VaultXCommand(this);
             getCommand("vaultx").setExecutor(vxCmd);
             getCommand("vaultx").setTabCompleter(vxCmd);
-
-            // Dynamically register all other economy shortcut commands (renaming, aliases, permissions, enabling/disabling)
             net.milkbowl.vault.command.CommandRegistrationManager.registerCommands(this, vxCmd, vxCmd);
         }
 
-        // Load up Plugin Metrics
+        // Metrics
         if (getConfig().getBoolean("metrics.enabled", true)) {
             int pluginId = 31404;
             Metrics metrics = new Metrics(this, pluginId);
@@ -510,40 +304,39 @@ public class Vault extends JavaPlugin {
         // Initialize Bank Backup Manager
         boolean backupEnabled = getConfig().getBoolean("banks.backup.enabled", true);
         int backupInterval = getConfig().getInt("banks.backup.interval-minutes", 30);
-        bankBackupManager = new net.milkbowl.vault.economy.BankBackupManager(this, backupEnabled, backupInterval);
+        serviceRegistry.setBankBackupManager(new net.milkbowl.vault.economy.BankBackupManager(this, backupEnabled, backupInterval));
 
         // Inject Modern Economy Interceptor Engine
         registerEconomyInterceptor();
 
         // Initialize Transaction Firewall
-        firewall = new net.milkbowl.vault.security.TransactionFirewall(this);
+        serviceRegistry.setFirewall(new net.milkbowl.vault.security.TransactionFirewall(this));
 
         // Initialize Paydays
         if (getConfig().getBoolean("paydays.enabled", true)) {
-            paydayManager = new net.milkbowl.vault.economy.PaydayManager(this);
+            serviceRegistry.setPaydayManager(new net.milkbowl.vault.economy.PaydayManager(this));
         }
 
         // Register Physical Economy ATM & Check Listener
         getServer().getPluginManager().registerEvents(new net.milkbowl.vault.listener.PhysicalEconomyListener(this), this);
 
         // Register Modern VaultX APIs in Bukkit ServicesManager
-        if (escrowManager != null) {
-            getServer().getServicesManager().register(net.milkbowl.vault.economy.VaultEscrowAPI.class, escrowManager, this, org.bukkit.plugin.ServicePriority.Highest);
+        if (serviceRegistry.getEscrowManager() != null) {
+            getServer().getServicesManager().register(net.milkbowl.vault.economy.VaultEscrowAPI.class, serviceRegistry.getEscrowManager(), this, org.bukkit.plugin.ServicePriority.Highest);
         }
-        if (firewall != null) {
-            getServer().getServicesManager().register(net.milkbowl.vault.economy.VaultFirewallAPI.class, firewall, this, org.bukkit.plugin.ServicePriority.Highest);
+        if (serviceRegistry.getFirewall() != null) {
+            getServer().getServicesManager().register(net.milkbowl.vault.economy.VaultFirewallAPI.class, serviceRegistry.getFirewall(), this, org.bukkit.plugin.ServicePriority.Highest);
         }
-        if (blackMarketManager != null) {
-            getServer().getServicesManager().register(net.milkbowl.vault.economy.VaultBlackMarketAPI.class, blackMarketManager, this, org.bukkit.plugin.ServicePriority.Highest);
+        if (serviceRegistry.getBlackMarketManager() != null) {
+            getServer().getServicesManager().register(net.milkbowl.vault.economy.VaultBlackMarketAPI.class, serviceRegistry.getBlackMarketManager(), this, org.bukkit.plugin.ServicePriority.Highest);
         }
-        if (stockExchangeManager != null) {
-            getServer().getServicesManager().register(net.milkbowl.vault.economy.VaultStockAPI.class, stockExchangeManager, this, org.bukkit.plugin.ServicePriority.Highest);
+        if (serviceRegistry.getStockExchangeManager() != null) {
+            getServer().getServicesManager().register(net.milkbowl.vault.economy.VaultStockAPI.class, serviceRegistry.getStockExchangeManager(), this, org.bukkit.plugin.ServicePriority.Highest);
         }
 
         // Register PlaceholderAPI Expansion if available
         if (Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
-            net.milkbowl.vault.util.VaultPlaceholderExpansion expansion = new net.milkbowl.vault.util.VaultPlaceholderExpansion(
-                    this);
+            net.milkbowl.vault.util.VaultPlaceholderExpansion expansion = new net.milkbowl.vault.util.VaultPlaceholderExpansion(this);
             expansion.register();
             getServer().getPluginManager().registerEvents(expansion, this);
         }
@@ -775,8 +568,7 @@ public class Vault extends JavaPlugin {
         // 1. Wrap any economy plugin already loaded at startup
         wrapExistingEconomies();
 
-        // 2. Dynamically intercept future economy providers and clean cache on
-        // disconnect
+        // 2. Dynamically intercept future economy providers and clean cache on disconnect
         getServer().getPluginManager().registerEvents(new Listener() {
 
             @EventHandler
@@ -791,26 +583,26 @@ public class Vault extends JavaPlugin {
 
             @EventHandler
             public void onPlayerQuit(PlayerQuitEvent event) {
-                for (OptimizedEconomy econ : wrappedEconomies) {
+                for (OptimizedEconomy econ : serviceRegistry.getWrappedEconomies()) {
                     if (econ != null) {
                         econ.invalidateCache(event.getPlayer());
                     }
                 }
-                if (firewall != null) {
-                    firewall.invalidateCache(event.getPlayer());
+                if (serviceRegistry.getFirewall() != null) {
+                    serviceRegistry.getFirewall().invalidateCache(event.getPlayer());
                 }
-                if (blackMarketManager != null) {
-                    blackMarketManager.cleanupPlayer(event.getPlayer().getUniqueId());
+                if (serviceRegistry.getBlackMarketManager() != null) {
+                    serviceRegistry.getBlackMarketManager().cleanupPlayer(event.getPlayer().getUniqueId());
                 }
-                if (discordManager != null) {
-                    discordManager.cleanupPlayer(event.getPlayer().getUniqueId());
+                if (serviceRegistry.getDiscordManager() != null) {
+                    serviceRegistry.getDiscordManager().cleanupPlayer(event.getPlayer().getUniqueId());
                 }
             }
 
             @EventHandler
             public void onPlayerPreLogin(org.bukkit.event.player.AsyncPlayerPreLoginEvent event) {
                 final UUID uuid = event.getUniqueId();
-                for (OptimizedEconomy econ : wrappedEconomies) {
+                for (OptimizedEconomy econ : serviceRegistry.getWrappedEconomies()) {
                     if (econ != null) {
                         econ.warmCache(uuid);
                     }
@@ -820,7 +612,7 @@ public class Vault extends JavaPlugin {
             @EventHandler
             public void onPlayerJoin(org.bukkit.event.player.PlayerJoinEvent event) {
                 org.bukkit.entity.Player player = event.getPlayer();
-                for (OptimizedEconomy econ : wrappedEconomies) {
+                for (OptimizedEconomy econ : serviceRegistry.getWrappedEconomies()) {
                     if (econ != null) {
                         econ.onPlayerJoin(player);
                     }
@@ -833,8 +625,6 @@ public class Vault extends JavaPlugin {
         wrapAndRegisterEconomyFallback();
     }
 
-    private static final java.util.List<OptimizedEconomy> wrappedEconomies = new java.util.concurrent.CopyOnWriteArrayList<>();
-
     private void createAndRegisterWrapper(Economy delegate, ServicePriority priority) {
         boolean useCache = getConfig().getBoolean("economy.use-cache", true);
         boolean debugTransactions = getConfig().getBoolean("economy.debug-transactions", false);
@@ -846,7 +636,7 @@ public class Vault extends JavaPlugin {
         boolean nativeBanks = getConfig().getBoolean("banks.native-redis.enabled", true);
 
         // Shutdown any previous wrapper for this delegate
-        wrappedEconomies.removeIf(econ -> {
+        serviceRegistry.getWrappedEconomies().removeIf(econ -> {
             if (econ.getDelegate() == delegate) {
                 try {
                     econ.shutdown();
@@ -858,7 +648,7 @@ public class Vault extends JavaPlugin {
 
         OptimizedEconomy wrapped = new OptimizedEconomy(this, delegate, useCache, debugTransactions, rateLimiterEnabled,
                 maxTps, cooldown, nativeBanks);
-        wrappedEconomies.add(wrapped);
+        serviceRegistry.getWrappedEconomies().add(wrapped);
 
         sm.register(Economy.class, wrapped, this, priority);
         sm.register(MultiCurrencyEconomy.class, wrapped, this, priority);
@@ -929,8 +719,8 @@ public class Vault extends JavaPlugin {
     }
 
     public static double getDynamicTaxPercent(String taxKey, double fallback) {
-        if (failoverManager == null) return fallback;
-        String val = failoverManager.getSetting("tax_" + taxKey);
+        if (serviceRegistry.getFailoverManager() == null) return fallback;
+        String val = serviceRegistry.getFailoverManager().getSetting("tax_" + taxKey);
         if (val == null) return fallback;
         try {
             return Double.parseDouble(val);
@@ -940,8 +730,8 @@ public class Vault extends JavaPlugin {
     }
 
     public static void setDynamicTaxPercent(String taxKey, double percent) {
-        if (failoverManager != null) {
-            failoverManager.saveSetting("tax_" + taxKey, String.valueOf(percent));
+        if (serviceRegistry.getFailoverManager() != null) {
+            serviceRegistry.getFailoverManager().saveSetting("tax_" + taxKey, String.valueOf(percent));
         }
     }
 

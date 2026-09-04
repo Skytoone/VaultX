@@ -4,27 +4,37 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import net.milkbowl.vault.economy.events.VaultTransactionEvent;
 import net.milkbowl.vault.economy.events.VaultTransactionEvent.TransactionType;
-import net.milkbowl.vault.economy.events.VaultInflationUpdateEvent;
 import net.milkbowl.vault.economy.events.VaultPreTransactionEvent;
-import net.milkbowl.vault.economy.events.VaultBankTransactionEvent;
-import net.milkbowl.vault.economy.events.VaultBankTransactionEvent.BankTransactionType;
-import net.milkbowl.vault.economy.events.VaultMilestoneReachedEvent;
+import net.milkbowl.vault.economy.service.BalanceCacheManager;
+import net.milkbowl.vault.economy.service.BankCheckService;
+import net.milkbowl.vault.economy.service.BankEconomyService;
+import net.milkbowl.vault.economy.service.CurrencyService;
+import net.milkbowl.vault.economy.service.ExchangeService;
+import net.milkbowl.vault.economy.service.LoanEconomyService;
+import net.milkbowl.vault.economy.service.MilestoneService;
+import net.milkbowl.vault.economy.service.WealthTaxManager;
 
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
 
+import net.milkbowl.vault.Vault;
+import net.milkbowl.vault.redis.LocalFailoverManager;
 import net.milkbowl.vault.redis.VaultRedisManager;
+import net.milkbowl.vault.util.FoliaScheduler;
 import net.milkbowl.vault.util.StripedLock;
+import net.milkbowl.vault.util.UUIDCache;
+import net.milkbowl.vault.util.VaultXVisuals;
 
 /**
- * Enterprise-grade high performance decorator wrapper for Vault Economy
- * providers.
- * Implements ultra-fast O(1) in-memory caching for online players, Virtual
- * Threads,
+ * Enterprise-grade high performance decorator wrapper for Vault Economy providers.
+ * Implements ultra-fast O(1) in-memory caching for online players, Virtual Threads,
  * Redis cross-server synchronization, and Multi-Currency support.
  */
 @SuppressWarnings("deprecation")
@@ -36,187 +46,83 @@ public class OptimizedEconomy
         VaultMultiSigAPI, VaultAMMExchangeAPI, VaultSmartContractAPI, VaultStandingOrderAPI, VaultCashbackLoyaltyAPI {
 
     private final Economy delegate;
-    private final boolean useCache;
     private final boolean debugTransactions;
-    private final org.bukkit.plugin.Plugin plugin;
-    private final boolean rateLimiterEnabled;
-    private final int maxTps;
-    private final int cooldownSeconds;
-    private final boolean nativeBanks;
-    private final boolean autoConvert;
-    private final org.bukkit.configuration.ConfigurationSection exchangeRates;
-    private final long onlineCacheTtlMs;
-    private final String formatSymbol;
-    private final String formatPosition;
-    private final boolean formatUseShort;
-    private final char formatDecSep;
-    private final java.util.concurrent.ExecutorService asyncExecutor = java.util.concurrent.Executors
-            .newVirtualThreadPerTaskExecutor();
+    private final Plugin plugin;
+    private final ExecutorService asyncExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
-    // Cache entry record for player balances (Java 21 zero-boilerplate)
-    private record CacheEntry(double balance, long timestamp) {
-    }
-
-    // Thread-safe cache for high-throughput operations. Key format: Map<UUID,
-    // Map<currency, CacheEntry>>
-    private final Map<UUID, Map<String, CacheEntry>> balanceCache = new ConcurrentHashMap<>();
-
-    private final java.util.concurrent.atomic.AtomicLong cacheHits = new java.util.concurrent.atomic.AtomicLong(0);
-    private final java.util.concurrent.atomic.AtomicLong cacheMisses = new java.util.concurrent.atomic.AtomicLong(0);
+    // Specialized services
+    private final BalanceCacheManager balanceCacheManager;
+    private final BankCheckService bankCheckService;
+    private final LoanEconomyService loanEconomyService;
+    private final MilestoneService milestoneService;
+    private final CurrencyService currencyService;
+    private final WealthTaxManager wealthTaxManager;
+    private final BankEconomyService bankEconomyService;
+    private final ExchangeService exchangeService;
 
     public long getCacheHits() {
-        return cacheHits.get();
+        return balanceCacheManager.getCacheHits();
     }
 
     public long getCacheMisses() {
-        return cacheMisses.get();
+        return balanceCacheManager.getCacheMisses();
     }
 
-    private final Map<UUID, Map<String, CacheEntry>> offlineBalanceCache = new ConcurrentHashMap<>();
-    private static final long OFFLINE_CACHE_TTL_MS = 10000L; // 10 seconds TTL
-
-    private final Map<UUID, Long> negativeAccountCache = new ConcurrentHashMap<>();
-    private static final long NEGATIVE_CACHE_TTL_MS = 30000L; // 30 seconds TTL
-
-    // Rate limiter state
-    private final Map<UUID, Long> rateLimitWindow = new ConcurrentHashMap<>();
-    private final Map<UUID, Integer> rateLimitCount = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> rateLimitBlock = new ConcurrentHashMap<>();
-
-    // Bank cache
-    private final Map<String, Double> bankBalances = new ConcurrentHashMap<>();
 
     // Booster cache
     private final Map<String, Double> globalBoosters = new ConcurrentHashMap<>();
     private final Map<String, Long> globalBoosterExpirations = new ConcurrentHashMap<>();
 
-    // Lock, Subscription and Registry cache
+    // Lock and Registry cache
     private final StripedLock stripedLock = new StripedLock();
-    private final Map<String, SubscriptionDetails> activeSubscriptions = new ConcurrentHashMap<>();
-
-    public static class NativeCurrencyConfig {
-        public final String currencyId;
-        public final String symbol;
-        public final double startingBalance;
-        public final double exchangeRate;
-
-        public NativeCurrencyConfig(String currencyId, String symbol, double startingBalance, double exchangeRate) {
-            this.currencyId = currencyId;
-            this.symbol = symbol;
-            this.startingBalance = startingBalance;
-            this.exchangeRate = exchangeRate;
-        }
-    }
-
-    private final Map<String, CustomCurrencyProvider> customProviders = new ConcurrentHashMap<>();
-    private final Map<String, NativeCurrencyConfig> nativeRegisteredCurrencies = new ConcurrentHashMap<>();
 
     private final CryptoManager cryptoManager;
     private final AuctionManager auctionManager;
     private final StakingManager stakingManager;
     private final CreditManager creditManager;
 
-    private final org.bukkit.scheduler.BukkitTask cleanupTask;
-
-    public OptimizedEconomy(org.bukkit.plugin.Plugin plugin, Economy delegate, boolean useCache,
+    public OptimizedEconomy(Plugin plugin, Economy delegate, boolean useCache,
             boolean debugTransactions, boolean rateLimiterEnabled, int maxTps, int cooldownSeconds,
             boolean nativeBanks) {
         this.plugin = plugin;
+        this.debugTransactions = debugTransactions;
+        this.delegate = delegate;
         this.cryptoManager = new CryptoManager(plugin);
         this.auctionManager = new AuctionManager(plugin);
         this.stakingManager = new StakingManager(plugin);
         this.creditManager = new CreditManager(plugin);
-        this.delegate = delegate;
-        this.useCache = useCache;
-        this.debugTransactions = debugTransactions;
-        this.rateLimiterEnabled = rateLimiterEnabled;
-        this.maxTps = maxTps;
-        this.cooldownSeconds = cooldownSeconds;
-        this.nativeBanks = nativeBanks;
-        this.autoConvert = plugin.getConfig().getBoolean("currency-exchange.auto-convert", false);
-        this.exchangeRates = plugin.getConfig().getConfigurationSection("currency-exchange.rates");
-        this.onlineCacheTtlMs = plugin.getConfig().getLong("economy.cache-ttl-ms", 1000L);
-        this.formatSymbol = plugin.getConfig().getString("formatting.symbol", "$");
-        this.formatPosition = plugin.getConfig().getString("formatting.symbol-position", "AFTER");
-        this.formatUseShort = plugin.getConfig().getBoolean("formatting.use-short-format", false);
-        String decSepStr = plugin.getConfig().getString("formatting.decimal-separator", ".");
-        this.formatDecSep = (decSepStr != null && !decSepStr.isEmpty()) ? decSepStr.charAt(0) : '.';
 
-        // Clean up rate limiting state and expired cache entries every 30 seconds
-        this.cleanupTask = net.milkbowl.vault.util.FoliaScheduler.runTimerAsync(plugin, () -> {
-            long now = System.currentTimeMillis();
+        // Instantiate specialized services
+        this.balanceCacheManager = new BalanceCacheManager(plugin, useCache, rateLimiterEnabled, maxTps, cooldownSeconds);
+        this.bankCheckService = new BankCheckService(plugin, asyncExecutor, this);
+        this.loanEconomyService = new LoanEconomyService(plugin, asyncExecutor, this);
+        this.milestoneService = new MilestoneService(plugin, asyncExecutor);
+        this.currencyService = new CurrencyService(plugin);
+        this.wealthTaxManager = new WealthTaxManager(plugin);
+        this.bankEconomyService = new BankEconomyService(plugin, nativeBanks);
+        this.exchangeService = new ExchangeService(plugin);
 
-            // Prune online and offline balance cache entries
-            if (this.useCache) {
-                balanceCache.entrySet().removeIf(entry -> {
-                    UUID uuid = entry.getKey();
-                    if (Bukkit.getPlayer(uuid) == null) {
-                        return true;
-                    }
-                    Map<String, CacheEntry> inner = entry.getValue();
-                    if (inner != null) {
-                        inner.entrySet().removeIf(e -> (now - e.getValue().timestamp) > (onlineCacheTtlMs * 10));
-                        return inner.isEmpty();
-                    }
-                    return true;
-                });
-
-                offlineBalanceCache.entrySet().removeIf(entry -> {
-                    Map<String, CacheEntry> inner = entry.getValue();
-                    if (inner != null) {
-                        inner.entrySet().removeIf(e -> (now - e.getValue().timestamp) > OFFLINE_CACHE_TTL_MS);
-                        return inner.isEmpty();
-                    }
-                    return true;
-                });
-            }
-
-            negativeAccountCache.values().removeIf(expiry -> now > expiry);
-
-            // Prune expired rate limit entries (leak prevention for offline players)
-            rateLimitWindow.entrySet().removeIf(e -> (now - e.getValue()) > 1000L);
-            rateLimitCount.entrySet().removeIf(e -> !rateLimitWindow.containsKey(e.getKey()));
-            rateLimitBlock.entrySet().removeIf(e -> now > e.getValue());
-        }, 300L, 300L);
         preloadBanks();
     }
 
-    private boolean isRateLimited(OfflinePlayer player) {
-        if (!rateLimiterEnabled || player == null)
-            return false;
-        UUID uuid = player.getUniqueId();
-        long now = System.currentTimeMillis();
+    public BalanceCacheManager getBalanceCacheManager() {
+        return balanceCacheManager;
+    }
 
-        if (rateLimitBlock.containsKey(uuid)) {
-            if (now < rateLimitBlock.get(uuid))
-                return true;
-            rateLimitBlock.remove(uuid);
-        }
+    public BankCheckService getBankCheckService() {
+        return bankCheckService;
+    }
 
-        long windowStart = rateLimitWindow.getOrDefault(uuid, 0L);
-        if (now - windowStart > 1000) {
-            rateLimitWindow.put(uuid, now);
-            rateLimitCount.put(uuid, 1);
-        } else {
-            int count = rateLimitCount.getOrDefault(uuid, 0) + 1;
-            rateLimitCount.put(uuid, count);
-            if (count > maxTps) {
-                rateLimitBlock.put(uuid, now + (cooldownSeconds * 1000L));
-                if (player.isOnline() && player.getPlayer() != null) {
-                    plugin.getLogger().warning("[Vault Security] Player " + player.getName()
-                            + " exceeded transaction rate limit! Blocked for " + cooldownSeconds + "s.");
-                }
-                if (net.milkbowl.vault.Vault.getFirewall() != null) {
-                    net.milkbowl.vault.Vault.getFirewall().notifyRateLimit(player, count, maxTps, cooldownSeconds);
-                }
-                return true;
-            }
-        }
-        return false;
+    public LoanEconomyService getLoanEconomyService() {
+        return loanEconomyService;
+    }
+
+    public MilestoneService getMilestoneService() {
+        return milestoneService;
     }
 
     public void updateBankCacheFromRedis(String bankName, double balance) {
-        bankBalances.put(bankName.toLowerCase(), balance);
+        bankEconomyService.updateBankCacheFromRedis(bankName, balance);
     }
 
     public Economy getDelegate() {
@@ -239,23 +145,25 @@ public class OptimizedEconomy
         return creditManager;
     }
 
-    private double getNativeDefaultBalance(OfflinePlayer player) {
-        if (player == null)
-            return 0.0;
-        VaultRedisManager redis = VaultRedisManager.getInstance();
-        if (redis != null) {
-            return redis.getCustomCurrencyBalance(player.getUniqueId(), "default");
-        }
-        return net.milkbowl.vault.Vault.getFailoverManager().getCustomCurrencyBalance(player.getUniqueId(), "default");
+    public CurrencyService getCurrencyService() {
+        return currencyService;
     }
 
-    private double getNativeDefaultBalance(String playerName) {
-        if (playerName == null)
-            return 0.0;
-        OfflinePlayer op = resolvePlayerFast(playerName);
-        if (op == null)
-            return 0.0;
-        return getNativeDefaultBalance(op);
+    public WealthTaxManager getWealthTaxManager() {
+        return wealthTaxManager;
+    }
+
+    public BankEconomyService getBankEconomyService() {
+        return bankEconomyService;
+    }
+
+    public ExchangeService getExchangeService() {
+        return exchangeService;
+    }
+
+    private double getNativeDefaultBalance(OfflinePlayer player) {
+        if (player == null) return 0.0;
+        return balanceCacheManager.resolveStorageBalance(player.getUniqueId(), "default");
     }
 
     private EconomyResponse withdrawNativeDefault(OfflinePlayer player, double amount) {
@@ -276,40 +184,15 @@ public class OptimizedEconomy
     }
 
     public Map<String, Double> getBankBalances() {
-        return bankBalances;
+        return bankEconomyService.getBankBalances();
     }
 
     private OfflinePlayer resolvePlayerFast(String playerName) {
-        return net.milkbowl.vault.util.UUIDCache.getOfflinePlayerFast(playerName);
+        return UUIDCache.getOfflinePlayerFast(playerName);
     }
 
     public void preloadBanks() {
-        if (!nativeBanks)
-            return;
-        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
-            try {
-                // 1. Load from local database (SQLite/MySQL)
-                Map<String, Double> localBanks = net.milkbowl.vault.Vault.getFailoverManager().loadAllBanks();
-                if (localBanks != null) {
-                    for (Map.Entry<String, Double> entry : localBanks.entrySet()) {
-                        bankBalances.put(entry.getKey().toLowerCase(), entry.getValue());
-                    }
-                }
-
-                // 2. If Redis is enabled and online, load from Redis to overwrite/update with
-                // latest values
-                VaultRedisManager redis = VaultRedisManager.getInstance();
-                if (redis != null && redis.isOnline()) {
-                    for (String bankName : bankBalances.keySet()) {
-                        double redisBal = redis.getBankBalance(bankName);
-                        bankBalances.put(bankName.toLowerCase(), redisBal);
-                    }
-                }
-                plugin.getLogger().info("[VaultX] Preloaded " + bankBalances.size() + " banks into memory cache.");
-            } catch (Exception e) {
-                plugin.getLogger().warning("[VaultX] Failed to preload banks: " + e.getMessage());
-            }
-        });
+        bankEconomyService.preloadBanks();
     }
 
     /**
@@ -318,28 +201,16 @@ public class OptimizedEconomy
     public void invalidateCache(OfflinePlayer player) {
         if (player != null) {
             UUID uuid = player.getUniqueId();
-            rateLimitWindow.remove(uuid);
-            rateLimitCount.remove(uuid);
-            rateLimitBlock.remove(uuid);
-            negativeAccountCache.remove(uuid);
             if (cryptoManager != null)
                 cryptoManager.invalidatePlayer(uuid);
             if (creditManager != null)
                 creditManager.invalidatePlayer(uuid);
-            if (useCache) {
-                balanceCache.remove(uuid);
-                offlineBalanceCache.remove(uuid);
-            }
+            balanceCacheManager.invalidateCache(player);
         }
     }
 
     public void shutdown() {
-        if (cleanupTask != null) {
-            try {
-                cleanupTask.cancel();
-            } catch (Exception ignored) {
-            }
-        }
+        balanceCacheManager.shutdown();
 
         // Persist all module data to DB before clearing caches
         if (cryptoManager != null) {
@@ -381,150 +252,40 @@ public class OptimizedEconomy
             asyncExecutor.shutdownNow();
         }
 
-        balanceCache.clear();
-        offlineBalanceCache.clear();
-        negativeAccountCache.clear();
-        rateLimitWindow.clear();
-        rateLimitCount.clear();
-        rateLimitBlock.clear();
-        bankBalances.clear();
+        bankEconomyService.clear();
         globalBoosters.clear();
         globalBoosterExpirations.clear();
-        activeSubscriptions.clear();
-        customProviders.clear();
-        registeredMilestones.clear();
-        inflationRates.clear();
-        taxRates.clear();
+        currencyService.clear();
+        milestoneService.clear();
+        wealthTaxManager.clear();
     }
 
     public void onPlayerJoin(Player player) {
-        UUID uuid = player.getUniqueId();
-        Map<String, CacheEntry> offlineBals = offlineBalanceCache.remove(uuid);
-        if (offlineBals != null) {
-            balanceCache.put(uuid, new ConcurrentHashMap<>(offlineBals));
-        } else {
-            // Fallback: warm cache asynchronously if missed pre-login
-            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> warmCache(uuid));
-        }
+        balanceCacheManager.onPlayerJoin(player, () -> warmCache(player.getUniqueId()));
     }
 
     public double getNativeDefaultBalance(UUID uuid) {
-        VaultRedisManager redis = VaultRedisManager.getInstance();
-        if (redis != null) {
-            return redis.getCustomCurrencyBalance(uuid, "default");
-        }
-        return net.milkbowl.vault.Vault.getFailoverManager().getCustomCurrencyBalance(uuid, "default");
+        return balanceCacheManager.getNativeDefaultBalance(uuid);
     }
 
     public void warmCache(UUID uuid) {
-        if (!useCache)
-            return;
-        long now = System.currentTimeMillis();
-        OfflinePlayer op = Bukkit.getOfflinePlayer(uuid);
-
-        // 1. Get default balance
-        double defaultBal = (delegate != null) ? delegate.getBalance(op) : getNativeDefaultBalance(uuid);
-        balanceCache.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).put("default",
-                new CacheEntry(defaultBal, now));
-        offlineBalanceCache.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).put("default",
-                new CacheEntry(defaultBal, now));
-
-        // 2. Multi-currency balances
-        for (String currency : getSupportedCurrencies()) {
-            if (!currency.equalsIgnoreCase("default")) {
-                double bal;
-                if (delegate instanceof MultiCurrencyEconomy) {
-                    bal = ((MultiCurrencyEconomy) delegate).getCurrencyBalance(op, currency);
-                } else {
-                    VaultRedisManager redis = VaultRedisManager.getInstance();
-                    if (redis != null) {
-                        bal = redis.getCustomCurrencyBalance(uuid, currency);
-                    } else {
-                        bal = net.milkbowl.vault.Vault.getFailoverManager().getCustomCurrencyBalance(uuid, currency);
-                    }
-                }
-                balanceCache.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).put(currency.toLowerCase(),
-                        new CacheEntry(bal, now));
-                offlineBalanceCache.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).put(currency.toLowerCase(),
-                        new CacheEntry(bal, now));
-            }
-        }
+        balanceCacheManager.warmCache(uuid, delegate, getSupportedCurrencies());
     }
 
     private void updateCache(OfflinePlayer player, String currency, double newBalance) {
-        if (player == null)
-            return;
-        if (useCache) {
-            String curr = currency == null ? "default" : currency.toLowerCase();
-            long now = System.currentTimeMillis();
-            if (player.isOnline()) {
-                balanceCache.computeIfAbsent(player.getUniqueId(), k -> new ConcurrentHashMap<>()).put(curr,
-                        new CacheEntry(newBalance, now));
-            } else {
-                offlineBalanceCache.computeIfAbsent(player.getUniqueId(), k -> new ConcurrentHashMap<>()).put(curr,
-                        new CacheEntry(newBalance, now));
-            }
-        }
-        VaultRedisManager redis = VaultRedisManager.getInstance();
-        if (redis != null) {
-            redis.publishBalanceUpdate(player.getUniqueId(), currency == null ? "default" : currency, newBalance);
-        }
-        net.milkbowl.vault.redis.VaultPostgresManager postgres = net.milkbowl.vault.redis.VaultPostgresManager
-                .getInstance();
-        if (postgres != null) {
-            postgres.updateBalance(player.getUniqueId(), currency == null ? "default" : currency, newBalance);
-        }
+        balanceCacheManager.updateCache(player, currency, newBalance);
     }
 
     public void updateCacheFromRedis(UUID uuid, String currency, double newBalance) {
-        if (useCache) {
-            String curr = currency == null ? "default" : currency.toLowerCase();
-            long now = System.currentTimeMillis();
-            Player onlinePlayer = Bukkit.getPlayer(uuid);
-            if (onlinePlayer != null) {
-                balanceCache.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).put(curr,
-                        new CacheEntry(newBalance, now));
-            } else {
-                offlineBalanceCache.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).put(curr,
-                        new CacheEntry(newBalance, now));
-            }
-        }
+        balanceCacheManager.updateCacheFromRedis(uuid, currency, newBalance);
     }
 
     private void saveCustomCurrencyBalance(OfflinePlayer player, String currency, double balance) {
-        String curr = currency == null ? "default" : currency.toLowerCase();
-        VaultRedisManager redis = VaultRedisManager.getInstance();
-        net.milkbowl.vault.redis.VaultPostgresManager postgres = net.milkbowl.vault.redis.VaultPostgresManager
-                .getInstance();
-        if (redis != null) {
-            redis.setCustomCurrencyBalance(player.getUniqueId(), curr, balance);
-        } else if (postgres != null) {
-            postgres.updateBalance(player.getUniqueId(), curr, balance);
-            final UUID uuid = player.getUniqueId();
-            final String normalizedCurr = curr;
-            final double newBal = balance;
-            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
-                net.milkbowl.vault.Vault.getFailoverManager().saveCustomCurrencyBalance(uuid, normalizedCurr, newBal);
-            });
-        } else {
-            final UUID uuid = player.getUniqueId();
-            final String normalizedCurr = curr;
-            final double newBal = balance;
-            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
-                net.milkbowl.vault.Vault.getFailoverManager().saveCustomCurrencyBalance(uuid, normalizedCurr, newBal);
-            });
-        }
+        balanceCacheManager.saveCustomCurrencyBalance(player, currency, balance);
     }
 
     public void purgePlayerCache(UUID uuid) {
-        if (uuid == null)
-            return;
-        balanceCache.remove(uuid);
-        offlineBalanceCache.remove(uuid);
-        negativeAccountCache.remove(uuid);
-        rateLimitWindow.remove(uuid);
-        rateLimitCount.remove(uuid);
-        rateLimitBlock.remove(uuid);
+        balanceCacheManager.purgePlayerCache(uuid);
     }
 
     private void triggerEventAsync(OfflinePlayer player, double amount, String currency, TransactionType type) {
@@ -534,7 +295,8 @@ public class OptimizedEconomy
     private void triggerEventAsync(OfflinePlayer player, OfflinePlayer target, double amount, String currency,
             TransactionType type, String reason, double newBalance) {
         boolean hasListeners = VaultTransactionEvent.getHandlerList().getRegisteredListeners().length > 0;
-        boolean hasFailover = net.milkbowl.vault.Vault.getFailoverManager() != null && player != null;
+        var fm = failover();
+        boolean hasFailover = fm != null && player != null;
 
         if (!hasListeners && !hasFailover && !debugTransactions) {
             return; // Short-circuit: Zero allocations when no listeners or failover active
@@ -548,14 +310,14 @@ public class OptimizedEconomy
         }
         String caller = findCallerPlugin();
         String curr = currency == null ? "default" : currency;
-        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+        FoliaScheduler.runAsync(plugin, () -> {
             if (hasListeners) {
                 VaultTransactionEvent event = new VaultTransactionEvent(player, target, amount, curr, type, caller,
                         reason, newBalance);
                 Bukkit.getPluginManager().callEvent(event);
             }
             if (hasFailover) {
-                net.milkbowl.vault.Vault.getFailoverManager().savePlayerTransaction(
+                fm.savePlayerTransaction(
                         player.getUniqueId(),
                         type.name(),
                         curr,
@@ -563,6 +325,11 @@ public class OptimizedEconomy
                         caller);
             }
         });
+    }
+
+    /** Retourne le LocalFailoverManager ou null s'il est absent. Remplace les appels FQCN répétés. */
+    private net.milkbowl.vault.redis.LocalFailoverManager failover() {
+        return net.milkbowl.vault.Vault.getFailoverManager();
     }
 
     private String findCallerPlugin() {
@@ -588,100 +355,30 @@ public class OptimizedEconomy
 
     @Override
     public double getBalance(OfflinePlayer player) {
-        if (player == null)
-            return 0.0;
-        if (useCache) {
-            UUID uuid = player.getUniqueId();
-            long now = System.currentTimeMillis();
-            if (player.isOnline()) {
-                Map<String, CacheEntry> playerBals = balanceCache.get(uuid);
-                if (playerBals != null) {
-                    CacheEntry cached = playerBals.get("default");
-                    if (cached != null && (now - cached.timestamp) < getEffectiveTtl()) {
-                        cacheHits.incrementAndGet();
-                        return cached.balance;
-                    }
-                }
-                cacheMisses.incrementAndGet();
-                double bal = (delegate != null) ? delegate.getBalance(player) : getNativeDefaultBalance(player);
-                balanceCache.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).put("default",
-                        new CacheEntry(bal, now));
-                return bal;
-            } else {
-                if (!player.hasPlayedBefore()) {
-                    Long blockedUntil = negativeAccountCache.get(uuid);
-                    if (blockedUntil != null && now < blockedUntil) {
-                        cacheHits.incrementAndGet();
-                        return 0.0;
-                    }
-                }
-                Map<String, CacheEntry> playerBals = offlineBalanceCache.get(uuid);
-                if (playerBals != null) {
-                    CacheEntry entry = playerBals.get("default");
-                    if (entry != null && (now - entry.timestamp) < OFFLINE_CACHE_TTL_MS) {
-                        cacheHits.incrementAndGet();
-                        return entry.balance;
-                    }
-                }
-                cacheMisses.incrementAndGet();
-                double bal = (delegate != null) ? delegate.getBalance(player) : getNativeDefaultBalance(player);
-                if (bal == 0.0 && !player.hasPlayedBefore()) {
-                    negativeAccountCache.put(uuid, now + NEGATIVE_CACHE_TTL_MS);
-                }
-                offlineBalanceCache.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).put("default",
-                        new CacheEntry(bal, now));
-                return bal;
-            }
-        }
-        return (delegate != null) ? delegate.getBalance(player) : getNativeDefaultBalance(player);
+        if (player == null) return 0.0;
+        UUID uuid = player.getUniqueId();
+        return balanceCacheManager.getOrFetchBalance(uuid, player.isOnline(), player.hasPlayedBefore(), "default",
+                () -> (delegate != null) ? delegate.getBalance(player) : getNativeDefaultBalance(player));
     }
 
     @Override
     public double getBalance(String playerName) {
-        if (playerName == null)
-            return 0;
+        if (playerName == null) return 0;
         Player online = Bukkit.getPlayerExact(playerName);
-        long now = System.currentTimeMillis();
-        if (useCache && online != null) {
-            UUID uuid = online.getUniqueId();
-            Map<String, CacheEntry> playerBals = balanceCache.get(uuid);
-            if (playerBals != null) {
-                CacheEntry cached = playerBals.get("default");
-                if (cached != null && (now - cached.timestamp) < getEffectiveTtl()) {
-                    cacheHits.incrementAndGet();
-                    return cached.balance;
-                }
-            }
-            cacheMisses.incrementAndGet();
-            double bal = (delegate != null) ? delegate.getBalance(playerName) : getNativeDefaultBalance(playerName);
-            balanceCache.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).put("default", new CacheEntry(bal, now));
-            return bal;
+        if (online != null) {
+            return balanceCacheManager.getOrFetchBalance(online.getUniqueId(), true, true, "default",
+                    () -> (delegate != null) ? delegate.getBalance(playerName) : getNativeDefaultBalance(online));
         }
-        if (useCache) {
-            OfflinePlayer op = resolvePlayerFast(playerName);
-            if (op != null) {
-                UUID uuid = op.getUniqueId();
-                Map<String, CacheEntry> playerBals = offlineBalanceCache.get(uuid);
-                if (playerBals != null) {
-                    CacheEntry entry = playerBals.get("default");
-                    if (entry != null && (now - entry.timestamp) < OFFLINE_CACHE_TTL_MS) {
-                        cacheHits.incrementAndGet();
-                        return entry.balance;
-                    }
-                }
-                cacheMisses.incrementAndGet();
-                double bal = (delegate != null) ? delegate.getBalance(playerName) : getNativeDefaultBalance(playerName);
-                offlineBalanceCache.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).put("default",
-                        new CacheEntry(bal, now));
-                return bal;
-            }
+        OfflinePlayer op = resolvePlayerFast(playerName);
+        if (op != null) {
+            return balanceCacheManager.getOrFetchBalance(op.getUniqueId(), false, true, "default",
+                    () -> (delegate != null) ? delegate.getBalance(playerName) : getNativeDefaultBalance(op));
         }
-        return (delegate != null) ? delegate.getBalance(playerName) : getNativeDefaultBalance(playerName);
+        return (delegate != null) ? delegate.getBalance(playerName) : 0.0;
     }
 
     @Override
     public double getBalance(OfflinePlayer player, String world) {
-        // Context-dependent balances usually bypass primary caches or share same logic
         return delegate != null ? delegate.getBalance(player, world) : getBalance(player);
     }
 
@@ -697,7 +394,7 @@ public class OptimizedEconomy
 
     private EconomyResponse executeTransaction(OfflinePlayer player, double amount, String currency, String type,
             TransactionType eventType, EconomyTransaction transaction) {
-        if (isRateLimited(player))
+        if (balanceCacheManager.isRateLimited(player))
             return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Rate limit exceeded");
         if (player == null)
             return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Player cannot be null");
@@ -749,8 +446,8 @@ public class OptimizedEconomy
                 }
                 if (player.isOnline() && player.getPlayer() != null) {
                     Player onlinePlayer = player.getPlayer();
-                    net.milkbowl.vault.util.FoliaScheduler.runEntitySync(plugin, onlinePlayer,
-                            () -> net.milkbowl.vault.util.VaultXVisuals.sendTransactionNotification(
+                    FoliaScheduler.runEntitySync(plugin, onlinePlayer,
+                            () -> VaultXVisuals.sendTransactionNotification(
                                     onlinePlayer,
                                     currency == null ? "default" : currency,
                                     amount,
@@ -842,46 +539,7 @@ public class OptimizedEconomy
 
     @Override
     public boolean hasBankSupport() {
-        if (nativeBanks)
-            return true;
-        return delegate != null ? delegate.hasBankSupport() : false;
-    }
-
-    private double getBankBalanceNative(String name) {
-        String key = name.toLowerCase();
-        if (bankBalances.containsKey(key))
-            return bankBalances.get(key);
-        double bal = 0.0;
-        VaultRedisManager redis = VaultRedisManager.getInstance();
-        if (redis != null && redis.isOnline()) {
-            bal = redis.getBankBalance(name);
-        } else {
-            bal = net.milkbowl.vault.Vault.getFailoverManager().getBankBalance(name);
-        }
-        bankBalances.put(key, bal);
-        return bal;
-    }
-
-    private final ThreadLocal<java.text.DecimalFormat> cachedDecimalFormat = new ThreadLocal<>();
-
-    private java.text.DecimalFormat getDecimalFormat() {
-        java.text.DecimalFormat df = cachedDecimalFormat.get();
-        if (df == null) {
-            String decSepStr = plugin != null ? plugin.getConfig().getString("formatting.decimal-separator", ".") : ".";
-            String thousandSepStr = plugin != null ? plugin.getConfig().getString("formatting.thousands-separator", ",") : ",";
-            int decimals = plugin != null ? plugin.getConfig().getInt("formatting.decimal-places", 2) : 2;
-
-            char decSep = (decSepStr != null && !decSepStr.isEmpty()) ? decSepStr.charAt(0) : '.';
-            char thousandSep = (thousandSepStr != null && !thousandSepStr.isEmpty()) ? thousandSepStr.charAt(0) : ',';
-
-            java.text.DecimalFormatSymbols symbols = new java.text.DecimalFormatSymbols(java.util.Locale.US);
-            symbols.setDecimalSeparator(decSep);
-            symbols.setGroupingSeparator(thousandSep);
-
-            df = new java.text.DecimalFormat("#,##0" + (decimals > 0 ? "." + "0".repeat(decimals) : ""), symbols);
-            cachedDecimalFormat.set(df);
-        }
-        return df;
+        return bankEconomyService.hasBankSupport(delegate);
     }
 
     @Override
@@ -891,25 +549,7 @@ public class OptimizedEconomy
 
     @Override
     public String format(double amount) {
-        if (delegate != null)
-            return delegate.format(amount);
-
-        if (formatUseShort) {
-            String formatted;
-            if (amount >= 1_000_000_000) {
-                formatted = String.format(java.util.Locale.US, "%.2fB", amount / 1_000_000_000.0).replace('.', formatDecSep);
-            } else if (amount >= 1_000_000) {
-                formatted = String.format(java.util.Locale.US, "%.2fM", amount / 1_000_000.0).replace('.', formatDecSep);
-            } else if (amount >= 1_000) {
-                formatted = String.format(java.util.Locale.US, "%.2fk", amount / 1_000.0).replace('.', formatDecSep);
-            } else {
-                formatted = getDecimalFormat().format(amount);
-            }
-            return "BEFORE".equalsIgnoreCase(formatPosition) ? formatSymbol + formatted : formatted + formatSymbol;
-        }
-
-        String val = getDecimalFormat().format(amount);
-        return "BEFORE".equalsIgnoreCase(formatPosition) ? formatSymbol + val : val + formatSymbol;
+        return currencyService.format(amount, delegate);
     }
 
     @Override
@@ -964,153 +604,62 @@ public class OptimizedEconomy
 
     @Override
     public EconomyResponse createBank(String name, String player) {
-        if (!nativeBanks && delegate != null)
-            return delegate.createBank(name, player);
-        if (bankBalances.containsKey(name.toLowerCase()))
-            return new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Bank exists");
-        bankBalances.put(name.toLowerCase(), 0.0);
-        VaultRedisManager redis = VaultRedisManager.getInstance();
-        net.milkbowl.vault.redis.VaultPostgresManager postgres = net.milkbowl.vault.redis.VaultPostgresManager
-                .getInstance();
-        if (redis != null && redis.isOnline()) {
-            redis.setBankBalance(name, 0.0);
-        } else if (postgres != null) {
-            postgres.setBankBalance(name, 0.0);
-            net.milkbowl.vault.Vault.getFailoverManager().saveBankBalance(name, 0.0);
-        } else {
-            net.milkbowl.vault.Vault.getFailoverManager().saveBankBalance(name, 0.0);
-        }
-        Bukkit.getPluginManager()
-                .callEvent(new VaultBankTransactionEvent(name, player, 0.0, BankTransactionType.CREATE_BANK, 0.0));
-        return new EconomyResponse(0, 0, EconomyResponse.ResponseType.SUCCESS, "");
+        return bankEconomyService.createBank(name, player, delegate);
     }
 
     @Override
     public EconomyResponse createBank(String name, OfflinePlayer player) {
-        return createBank(name, player != null ? player.getName() : "");
+        return bankEconomyService.createBank(name, player, delegate);
     }
 
     @Override
     public EconomyResponse deleteBank(String name) {
-        if (!nativeBanks && delegate != null)
-            return delegate.deleteBank(name);
-        bankBalances.remove(name.toLowerCase());
-        VaultRedisManager redis = VaultRedisManager.getInstance();
-        net.milkbowl.vault.redis.VaultPostgresManager postgres = net.milkbowl.vault.redis.VaultPostgresManager
-                .getInstance();
-        if (redis != null && redis.isOnline()) {
-            redis.setBankBalance(name, 0.0);
-        } else if (postgres != null) {
-            postgres.setBankBalance(name, 0.0);
-            net.milkbowl.vault.Vault.getFailoverManager().deleteBankAccount(name);
-        } else {
-            net.milkbowl.vault.Vault.getFailoverManager().deleteBankAccount(name);
-        }
-        Bukkit.getPluginManager().callEvent(
-                new VaultBankTransactionEvent(name, (String) null, 0.0, BankTransactionType.DELETE_BANK, 0.0));
-        return new EconomyResponse(0, 0, EconomyResponse.ResponseType.SUCCESS, "");
+        return bankEconomyService.deleteBank(name, delegate);
     }
 
     @Override
     public EconomyResponse bankBalance(String name) {
-        if (!nativeBanks && delegate != null)
-            return delegate.bankBalance(name);
-        return new EconomyResponse(0, getBankBalanceNative(name), EconomyResponse.ResponseType.SUCCESS, "");
+        return bankEconomyService.bankBalance(name, delegate);
     }
 
     @Override
     public EconomyResponse bankHas(String name, double amount) {
-        if (!nativeBanks && delegate != null)
-            return delegate.bankHas(name, amount);
-        double bal = getBankBalanceNative(name);
-        if (bal >= amount)
-            return new EconomyResponse(0, bal, EconomyResponse.ResponseType.SUCCESS, "");
-        return new EconomyResponse(0, bal, EconomyResponse.ResponseType.FAILURE, "Not enough funds");
+        return bankEconomyService.bankHas(name, amount, delegate);
     }
 
     @Override
     public EconomyResponse bankWithdraw(String name, double amount) {
-        if (!nativeBanks && delegate != null)
-            return delegate.bankWithdraw(name, amount);
-        if (Double.isNaN(amount) || Double.isInfinite(amount) || amount <= 0) {
-            return new EconomyResponse(0, getBankBalanceNative(name), EconomyResponse.ResponseType.FAILURE, "Invalid transaction amount");
-        }
-        double bal = getBankBalanceNative(name);
-        if (bal >= amount) {
-            bal -= amount;
-            bankBalances.put(name.toLowerCase(), bal);
-            VaultRedisManager redis = VaultRedisManager.getInstance();
-            net.milkbowl.vault.redis.VaultPostgresManager postgres = net.milkbowl.vault.redis.VaultPostgresManager
-                    .getInstance();
-            if (redis != null && redis.isOnline()) {
-                redis.setBankBalance(name, bal);
-            } else if (postgres != null) {
-                postgres.setBankBalance(name, bal);
-                net.milkbowl.vault.Vault.getFailoverManager().saveBankBalance(name, bal);
-            } else {
-                net.milkbowl.vault.Vault.getFailoverManager().saveBankBalance(name, bal);
-            }
-            Bukkit.getPluginManager().callEvent(
-                    new VaultBankTransactionEvent(name, (String) null, amount, BankTransactionType.WITHDRAW, bal));
-            return new EconomyResponse(amount, bal, EconomyResponse.ResponseType.SUCCESS, "");
-        }
-        return new EconomyResponse(0, bal, EconomyResponse.ResponseType.FAILURE, "Not enough funds");
+        return bankEconomyService.bankWithdraw(name, amount, delegate);
     }
 
     @Override
     public EconomyResponse bankDeposit(String name, double amount) {
-        if (!nativeBanks && delegate != null)
-            return delegate.bankDeposit(name, amount);
-        if (Double.isNaN(amount) || Double.isInfinite(amount) || amount <= 0) {
-            return new EconomyResponse(0, getBankBalanceNative(name), EconomyResponse.ResponseType.FAILURE, "Invalid transaction amount");
-        }
-        double bal = getBankBalanceNative(name) + amount;
-        bankBalances.put(name.toLowerCase(), bal);
-        VaultRedisManager redis = VaultRedisManager.getInstance();
-        net.milkbowl.vault.redis.VaultPostgresManager postgres = net.milkbowl.vault.redis.VaultPostgresManager
-                .getInstance();
-        if (redis != null && redis.isOnline()) {
-            redis.setBankBalance(name, bal);
-        } else if (postgres != null) {
-            postgres.setBankBalance(name, bal);
-            net.milkbowl.vault.Vault.getFailoverManager().saveBankBalance(name, bal);
-        } else {
-            net.milkbowl.vault.Vault.getFailoverManager().saveBankBalance(name, bal);
-        }
-        Bukkit.getPluginManager().callEvent(
-                new VaultBankTransactionEvent(name, (String) null, amount, BankTransactionType.DEPOSIT, bal));
-        return new EconomyResponse(amount, bal, EconomyResponse.ResponseType.SUCCESS, "");
+        return bankEconomyService.bankDeposit(name, amount, delegate);
     }
 
     @Override
     public EconomyResponse isBankOwner(String name, String playerName) {
-        if (!nativeBanks && delegate != null)
-            return delegate.isBankOwner(name, playerName);
-        return new EconomyResponse(0, 0, EconomyResponse.ResponseType.NOT_IMPLEMENTED, "VaultX Banks are shared");
+        return bankEconomyService.isBankOwner(name, playerName, delegate);
     }
 
     @Override
     public EconomyResponse isBankOwner(String name, OfflinePlayer player) {
-        return isBankOwner(name, "");
+        return bankEconomyService.isBankOwner(name, player, delegate);
     }
 
     @Override
     public EconomyResponse isBankMember(String name, String playerName) {
-        if (!nativeBanks && delegate != null)
-            return delegate.isBankMember(name, playerName);
-        return new EconomyResponse(0, 0, EconomyResponse.ResponseType.NOT_IMPLEMENTED, "VaultX Banks are shared");
+        return bankEconomyService.isBankMember(name, playerName, delegate);
     }
 
     @Override
     public EconomyResponse isBankMember(String name, OfflinePlayer player) {
-        return isBankMember(name, "");
+        return bankEconomyService.isBankMember(name, player, delegate);
     }
 
     @Override
     public java.util.List<String> getBanks() {
-        if (!nativeBanks && delegate != null)
-            return delegate.getBanks();
-        return new java.util.ArrayList<>(bankBalances.keySet());
+        return bankEconomyService.getBanks(delegate);
     }
 
     @Override
@@ -1135,318 +684,56 @@ public class OptimizedEconomy
 
     /* --- MULTI-CURRENCY API --- */
 
-    private Double invokeDelegateGetCurrencyBalance(OfflinePlayer player, String currency) {
-        if (delegate == null)
-            return null;
-        if (delegate instanceof MultiCurrencyEconomy) {
-            return ((MultiCurrencyEconomy) delegate).getCurrencyBalance(player, currency);
-        }
-        try {
-            java.lang.reflect.Method m = delegate.getClass().getMethod("getCurrencyBalance", OfflinePlayer.class,
-                    String.class);
-            return (Double) m.invoke(delegate, player, currency);
-        } catch (Throwable ignored) {
-        }
-        try {
-            java.lang.reflect.Method m = delegate.getClass().getMethod("getBalance", OfflinePlayer.class, String.class);
-            return (Double) m.invoke(delegate, player, currency);
-        } catch (Throwable ignored) {
-        }
-        return null;
-    }
-
-    private Double invokeDelegateGetCurrencyBalance(String playerName, String currency) {
-        if (delegate == null)
-            return null;
-        if (delegate instanceof MultiCurrencyEconomy) {
-            return ((MultiCurrencyEconomy) delegate).getCurrencyBalance(playerName, currency);
-        }
-        try {
-            java.lang.reflect.Method m = delegate.getClass().getMethod("getCurrencyBalance", String.class,
-                    String.class);
-            return (Double) m.invoke(delegate, playerName, currency);
-        } catch (Throwable ignored) {
-        }
-        try {
-            java.lang.reflect.Method m = delegate.getClass().getMethod("getBalance", String.class, String.class);
-            return (Double) m.invoke(delegate, playerName, currency);
-        } catch (Throwable ignored) {
-        }
-        return null;
-    }
-
-    private EconomyResponse invokeDelegateWithdrawCurrency(OfflinePlayer player, String currency, double amount) {
-        if (delegate == null)
-            return null;
-        if (delegate instanceof MultiCurrencyEconomy) {
-            return ((MultiCurrencyEconomy) delegate).withdrawCurrencyPlayer(player, currency, amount);
-        }
-        try {
-            java.lang.reflect.Method m = delegate.getClass().getMethod("withdrawCurrencyPlayer", OfflinePlayer.class,
-                    String.class, double.class);
-            return (EconomyResponse) m.invoke(delegate, player, currency, amount);
-        } catch (Throwable ignored) {
-        }
-        try {
-            java.lang.reflect.Method m = delegate.getClass().getMethod("withdrawPlayer", OfflinePlayer.class,
-                    String.class, double.class);
-            return (EconomyResponse) m.invoke(delegate, player, currency, amount);
-        } catch (Throwable ignored) {
-        }
-        return null;
-    }
-
-    private EconomyResponse invokeDelegateDepositCurrency(OfflinePlayer player, String currency, double amount) {
-        if (delegate == null)
-            return null;
-        if (delegate instanceof MultiCurrencyEconomy) {
-            return ((MultiCurrencyEconomy) delegate).depositCurrencyPlayer(player, currency, amount);
-        }
-        try {
-            java.lang.reflect.Method m = delegate.getClass().getMethod("depositCurrencyPlayer", OfflinePlayer.class,
-                    String.class, double.class);
-            return (EconomyResponse) m.invoke(delegate, player, currency, amount);
-        } catch (Throwable ignored) {
-        }
-        try {
-            java.lang.reflect.Method m = delegate.getClass().getMethod("depositPlayer", OfflinePlayer.class,
-                    String.class, double.class);
-            return (EconomyResponse) m.invoke(delegate, player, currency, amount);
-        } catch (Throwable ignored) {
-        }
-        return null;
-    }
-
     @Override
-    @SuppressWarnings("unchecked")
     public java.util.List<String> getSupportedCurrencies() {
-        if (delegate instanceof MultiCurrencyEconomy) {
-            return ((MultiCurrencyEconomy) delegate).getSupportedCurrencies();
-        }
-        if (delegate != null) {
-            try {
-                java.lang.reflect.Method m = delegate.getClass().getMethod("getSupportedCurrencies");
-                Object res = m.invoke(delegate);
-                if (res instanceof java.util.List)
-                    return (java.util.List<String>) res;
-            } catch (Throwable ignored) {
-            }
-            try {
-                java.lang.reflect.Method m = delegate.getClass().getMethod("getCurrencies");
-                Object res = m.invoke(delegate);
-                if (res instanceof java.util.List)
-                    return (java.util.List<String>) res;
-            } catch (Throwable ignored) {
-            }
-        }
-        java.util.List<String> currencies = new java.util.ArrayList<>();
-        currencies.add("default");
-        if (exchangeRates != null) {
-            for (String key : exchangeRates.getKeys(false)) {
-                String normalized = key.toLowerCase();
-                if (!normalized.equals("default") && !currencies.contains(normalized)) {
-                    currencies.add(normalized);
-                }
-            }
-        }
-        for (String c : customProviders.keySet()) {
-            if (!currencies.contains(c)) {
-                currencies.add(c);
-            }
-        }
-        for (String c : nativeRegisteredCurrencies.keySet()) {
-            if (!currencies.contains(c)) {
-                currencies.add(c);
-            }
-        }
-        return currencies;
+        return currencyService.getSupportedCurrencies(delegate);
     }
 
     @Override
     public double getCurrencyBalance(OfflinePlayer player, String currency) {
-        if (player == null || currency == null)
-            return 0.0;
-        if (currency.equalsIgnoreCase("default")) {
-            return getBalance(player);
-        }
-        String curr = currency.toLowerCase();
-        if (useCache) {
-            UUID uuid = player.getUniqueId();
-            long now = System.currentTimeMillis();
-            if (player.isOnline()) {
-                Map<String, CacheEntry> playerBals = balanceCache.get(uuid);
-                if (playerBals != null) {
-                    CacheEntry cached = playerBals.get(curr);
-                    if (cached != null && (now - cached.timestamp) < getEffectiveTtl()) {
-                        cacheHits.incrementAndGet();
-                        return cached.balance;
-                    }
-                }
-                cacheMisses.incrementAndGet();
-                Double delegateBal = invokeDelegateGetCurrencyBalance(player, currency);
-                double bal;
-                if (delegateBal != null) {
-                    bal = delegateBal;
-                } else {
-                    VaultRedisManager redis = VaultRedisManager.getInstance();
-                    if (redis != null) {
-                        bal = redis.getCustomCurrencyBalance(player.getUniqueId(), currency);
-                    } else {
-                        bal = net.milkbowl.vault.Vault.getFailoverManager()
-                                .getCustomCurrencyBalance(player.getUniqueId(), currency);
-                    }
-                }
-                balanceCache.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).put(curr, new CacheEntry(bal, now));
-                return bal;
-            } else {
-                if (!player.hasPlayedBefore()) {
-                    Long blockedUntil = negativeAccountCache.get(uuid);
-                    if (blockedUntil != null && now < blockedUntil) {
-                        cacheHits.incrementAndGet();
-                        return 0.0;
-                    }
-                }
-                Map<String, CacheEntry> playerBals = offlineBalanceCache.get(uuid);
-                if (playerBals != null) {
-                    CacheEntry entry = playerBals.get(curr);
-                    if (entry != null && (now - entry.timestamp) < OFFLINE_CACHE_TTL_MS) {
-                        cacheHits.incrementAndGet();
-                        return entry.balance;
-                    }
-                }
-                cacheMisses.incrementAndGet();
-                Double delegateBal = invokeDelegateGetCurrencyBalance(player, currency);
-                double bal;
-                if (delegateBal != null) {
-                    bal = delegateBal;
-                } else {
-                    VaultRedisManager redis = VaultRedisManager.getInstance();
-                    if (redis != null) {
-                        bal = redis.getCustomCurrencyBalance(player.getUniqueId(), currency);
-                    } else {
-                        bal = net.milkbowl.vault.Vault.getFailoverManager()
-                                .getCustomCurrencyBalance(player.getUniqueId(), currency);
-                    }
-                }
-                if (bal == 0.0 && !player.hasPlayedBefore()) {
-                    negativeAccountCache.put(uuid, now + NEGATIVE_CACHE_TTL_MS);
-                }
-                offlineBalanceCache.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).put(curr,
-                        new CacheEntry(bal, now));
-                return bal;
-            }
-        }
-        Double delegateBal = invokeDelegateGetCurrencyBalance(player, currency);
-        if (delegateBal != null) {
-            return delegateBal;
-        }
-        VaultRedisManager redis = VaultRedisManager.getInstance();
-        if (redis != null) {
-            return redis.getCustomCurrencyBalance(player.getUniqueId(), currency);
-        }
-        return net.milkbowl.vault.Vault.getFailoverManager().getCustomCurrencyBalance(player.getUniqueId(), currency);
+        if (player == null || currency == null) return 0.0;
+        if (currency.equalsIgnoreCase("default")) return getBalance(player);
+        UUID uuid = player.getUniqueId();
+        return balanceCacheManager.getOrFetchBalance(uuid, player.isOnline(), player.hasPlayedBefore(), currency, () -> {
+            Double delegateBal = currencyService.invokeDelegateGetCurrencyBalance(delegate, player, currency);
+            return (delegateBal != null) ? delegateBal : balanceCacheManager.resolveStorageBalance(uuid, currency);
+        });
     }
 
     @Override
     public double getCurrencyBalance(String playerName, String currency) {
-        if (playerName == null || currency == null)
-            return 0.0;
-        if (currency.equalsIgnoreCase("default")) {
-            return getBalance(playerName);
-        }
-        String curr = currency.toLowerCase();
+        if (playerName == null || currency == null) return 0.0;
+        if (currency.equalsIgnoreCase("default")) return getBalance(playerName);
         Player online = Bukkit.getPlayerExact(playerName);
-        long now = System.currentTimeMillis();
-        if (useCache && online != null) {
+        if (online != null) {
             UUID uuid = online.getUniqueId();
-            Map<String, CacheEntry> playerBals = balanceCache.get(uuid);
-            if (playerBals != null) {
-                CacheEntry cached = playerBals.get(curr);
-                if (cached != null && (now - cached.timestamp) < getEffectiveTtl()) {
-                    cacheHits.incrementAndGet();
-                    return cached.balance;
-                }
-            }
-            cacheMisses.incrementAndGet();
-            Double delegateBal = invokeDelegateGetCurrencyBalance(playerName, currency);
-            double bal;
-            if (delegateBal != null) {
-                bal = delegateBal;
-            } else {
-                VaultRedisManager redis = VaultRedisManager.getInstance();
-                if (redis != null) {
-                    bal = redis.getCustomCurrencyBalance(online.getUniqueId(), currency);
-                } else {
-                    bal = net.milkbowl.vault.Vault.getFailoverManager().getCustomCurrencyBalance(online.getUniqueId(),
-                            currency);
-                }
-            }
-            balanceCache.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).put(curr, new CacheEntry(bal, now));
-            return bal;
-        }
-        if (useCache) {
-            OfflinePlayer op = resolvePlayerFast(playerName);
-            if (op != null) {
-                UUID uuid = op.getUniqueId();
-                Map<String, CacheEntry> playerBals = offlineBalanceCache.get(uuid);
-                if (playerBals != null) {
-                    CacheEntry entry = playerBals.get(curr);
-                    if (entry != null && (now - entry.timestamp) < OFFLINE_CACHE_TTL_MS) {
-                        cacheHits.incrementAndGet();
-                        return entry.balance;
-                    }
-                }
-                cacheMisses.incrementAndGet();
-                Double delegateBal = invokeDelegateGetCurrencyBalance(playerName, currency);
-                double bal;
-                if (delegateBal != null) {
-                    bal = delegateBal;
-                } else {
-                    VaultRedisManager redis = VaultRedisManager.getInstance();
-                    if (redis != null) {
-                        bal = redis.getCustomCurrencyBalance(op.getUniqueId(), currency);
-                    } else {
-                        bal = net.milkbowl.vault.Vault.getFailoverManager().getCustomCurrencyBalance(op.getUniqueId(),
-                                currency);
-                    }
-                }
-                offlineBalanceCache.computeIfAbsent(uuid, k -> new ConcurrentHashMap<>()).put(curr,
-                        new CacheEntry(bal, now));
-                return bal;
-            }
-        }
-        Double delegateBal = invokeDelegateGetCurrencyBalance(playerName, currency);
-        if (delegateBal != null) {
-            return delegateBal;
+            return balanceCacheManager.getOrFetchBalance(uuid, true, true, currency, () -> {
+                Double delegateBal = currencyService.invokeDelegateGetCurrencyBalance(delegate, playerName, currency);
+                return (delegateBal != null) ? delegateBal : balanceCacheManager.resolveStorageBalance(uuid, currency);
+            });
         }
         OfflinePlayer op = resolvePlayerFast(playerName);
         if (op != null) {
-            VaultRedisManager redis = VaultRedisManager.getInstance();
-            if (redis != null) {
-                return redis.getCustomCurrencyBalance(op.getUniqueId(), currency);
-            }
-            return net.milkbowl.vault.Vault.getFailoverManager().getCustomCurrencyBalance(op.getUniqueId(), currency);
+            UUID uuid = op.getUniqueId();
+            return balanceCacheManager.getOrFetchBalance(uuid, false, true, currency, () -> {
+                Double delegateBal = currencyService.invokeDelegateGetCurrencyBalance(delegate, playerName, currency);
+                return (delegateBal != null) ? delegateBal : balanceCacheManager.resolveStorageBalance(uuid, currency);
+            });
         }
-        return 0.0;
+        Double delegateBal = currencyService.invokeDelegateGetCurrencyBalance(delegate, playerName, currency);
+        return (delegateBal != null) ? delegateBal : 0.0;
     }
 
     @Override
     public EconomyResponse withdrawCurrencyPlayer(OfflinePlayer player, String currency, double amount) {
         return executeTransaction(player, amount, currency, "WITHDRAW_" + currency, TransactionType.WITHDRAW, () -> {
-            EconomyResponse delegateRes = invokeDelegateWithdrawCurrency(player, currency, amount);
+            EconomyResponse delegateRes = currencyService.invokeDelegateWithdrawCurrency(delegate, player, currency, amount);
             if (delegateRes != null) {
-                if (!delegateRes.transactionSuccess() && autoConvert && exchangeRates != null) {
-                    double rate = exchangeRates.getDouble(currency, 0.0);
-                    if (rate > 0) {
-                        double defaultNeeded = amount * rate;
-                        if (getBalance(player) >= defaultNeeded) {
-                            EconomyResponse wRes = withdrawPlayer(player, defaultNeeded);
-                            if (wRes.transactionSuccess()) {
-                                delegateRes = new EconomyResponse(amount, getCurrencyBalance(player, currency),
-                                        EconomyResponse.ResponseType.SUCCESS, "Auto-converted from default currency");
-                            }
-                        }
-                    }
+                if (!delegateRes.transactionSuccess() && exchangeService.isAutoConvertEnabled()) {
+                    return exchangeService.handleAutoConvertWithdraw(player, currency, amount,
+                            this::getBalance,
+                            this::withdrawPlayer,
+                            c -> getCurrencyBalance(player, c));
                 }
                 return delegateRes;
             } else {
@@ -1459,27 +746,11 @@ public class OptimizedEconomy
                         bal -= amount;
                         saveCustomCurrencyBalance(player, currency, bal);
                         return new EconomyResponse(amount, bal, EconomyResponse.ResponseType.SUCCESS, "");
-                    } else if (autoConvert && exchangeRates != null) {
-                        double rate = exchangeRates.getDouble(currency, 0.0);
-                        if (rate > 0) {
-                            double defaultNeeded = amount * rate;
-                            if (getBalance(player) >= defaultNeeded) {
-                                EconomyResponse wRes = withdrawPlayer(player, defaultNeeded);
-                                if (wRes.transactionSuccess()) {
-                                    return new EconomyResponse(amount, bal, EconomyResponse.ResponseType.SUCCESS,
-                                            "Auto-converted from default currency");
-                                } else {
-                                    return new EconomyResponse(0, bal, EconomyResponse.ResponseType.FAILURE,
-                                            "Failed to auto-convert from default currency");
-                                }
-                            } else {
-                                return new EconomyResponse(0, bal, EconomyResponse.ResponseType.FAILURE,
-                                        "Not enough funds (including exchange auto-convert)");
-                            }
-                        } else {
-                            return new EconomyResponse(0, bal, EconomyResponse.ResponseType.FAILURE,
-                                    "Not enough funds");
-                        }
+                    } else if (exchangeService.isAutoConvertEnabled()) {
+                        return exchangeService.handleAutoConvertWithdraw(player, currency, amount,
+                                this::getBalance,
+                                this::withdrawPlayer,
+                                c -> getCurrencyBalance(player, c));
                     } else {
                         return new EconomyResponse(0, bal, EconomyResponse.ResponseType.FAILURE, "Not enough funds");
                     }
@@ -1499,7 +770,7 @@ public class OptimizedEconomy
     @Override
     public EconomyResponse depositCurrencyPlayer(OfflinePlayer player, String currency, double amount) {
         return executeTransaction(player, amount, currency, "DEPOSIT_" + currency, TransactionType.DEPOSIT, () -> {
-            EconomyResponse delegateRes = invokeDelegateDepositCurrency(player, currency, amount);
+            EconomyResponse delegateRes = currencyService.invokeDelegateDepositCurrency(delegate, player, currency, amount);
             if (delegateRes != null) {
                 return delegateRes;
             } else {
@@ -1525,24 +796,7 @@ public class OptimizedEconomy
 
     @Override
     public boolean hasCurrencyAccount(OfflinePlayer player, String currency) {
-        if (delegate != null) {
-            if (delegate instanceof MultiCurrencyEconomy) {
-                return ((MultiCurrencyEconomy) delegate).hasCurrencyAccount(player, currency);
-            }
-            try {
-                java.lang.reflect.Method m = delegate.getClass().getMethod("hasCurrencyAccount", OfflinePlayer.class,
-                        String.class);
-                return (Boolean) m.invoke(delegate, player, currency);
-            } catch (Throwable ignored) {
-            }
-            try {
-                java.lang.reflect.Method m = delegate.getClass().getMethod("hasAccount", OfflinePlayer.class,
-                        String.class);
-                return (Boolean) m.invoke(delegate, player, currency);
-            } catch (Throwable ignored) {
-            }
-        }
-        return delegate != null ? delegate.hasAccount(player) : true;
+        return currencyService.hasCurrencyAccount(delegate, player, currency);
     }
 
     @Override
@@ -1656,9 +910,9 @@ public class OptimizedEconomy
             int limit) {
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
             java.util.List<LeaderboardEntry> entries = new java.util.ArrayList<>();
-            if (net.milkbowl.vault.Vault.getFailoverManager() != null) {
-                Map<UUID, Double> topMap = net.milkbowl.vault.Vault.getFailoverManager()
-                        .getTopBalances(currency == null ? "default" : currency, limit);
+            var fm = failover();
+            if (fm != null) {
+                Map<UUID, Double> topMap = fm.getTopBalances(currency == null ? "default" : currency, limit);
                 int rank = 1;
                 for (Map.Entry<UUID, Double> entry : topMap.entrySet()) {
                     OfflinePlayer p = Bukkit.getOfflinePlayer(entry.getKey());
@@ -1673,10 +927,9 @@ public class OptimizedEconomy
     @Override
     public java.util.concurrent.CompletableFuture<Integer> getPlayerRankAsync(OfflinePlayer player, String currency) {
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-            if (player == null || net.milkbowl.vault.Vault.getFailoverManager() == null)
-                return -1;
-            return net.milkbowl.vault.Vault.getFailoverManager().getPlayerRank(player.getUniqueId(),
-                    currency == null ? "default" : currency);
+            var fm = failover();
+            if (player == null || fm == null) return -1;
+            return fm.getPlayerRank(player.getUniqueId(), currency == null ? "default" : currency);
         }, asyncExecutor);
     }
 
@@ -1722,34 +975,17 @@ public class OptimizedEconomy
 
     @Override
     public String formatCurrency(String currency, double amount) {
-        return formatCurrency(currency, amount, java.util.Locale.getDefault());
+        return currencyService.formatCurrency(currency, amount, java.util.Locale.getDefault());
     }
 
     @Override
     public String formatCurrency(String currency, double amount, java.util.Locale locale) {
-        String sym = getCurrencySymbol(currency);
-        java.text.NumberFormat nf = java.text.NumberFormat
-                .getNumberInstance(locale != null ? locale : java.util.Locale.getDefault());
-        nf.setMinimumFractionDigits(2);
-        nf.setMaximumFractionDigits(2);
-        return nf.format(amount) + " " + sym;
+        return currencyService.formatCurrency(currency, amount, locale);
     }
 
     @Override
     public String getCurrencySymbol(String currency) {
-        if (currency == null || currency.equalsIgnoreCase("default"))
-            return "$";
-        String key = currency.toLowerCase();
-        NativeCurrencyConfig cfg = nativeRegisteredCurrencies.get(key);
-        if (cfg != null)
-            return cfg.symbol;
-        if (currency.equalsIgnoreCase("gems"))
-            return "💎";
-        if (currency.equalsIgnoreCase("tokens"))
-            return "🪙";
-        if (currency.equalsIgnoreCase("coins"))
-            return "🪙";
-        return currency.toUpperCase();
+        return currencyService.getCurrencySymbol(currency);
     }
 
     @Override
@@ -1759,8 +995,19 @@ public class OptimizedEconomy
             if (targetUuid == null || amount <= 0)
                 return false;
             OfflinePlayer target = Bukkit.getOfflinePlayer(targetUuid);
-            EconomyResponse res = depositCurrencyPlayer(target, currency, amount);
-            return res.transactionSuccess();
+            if (target.isOnline()) {
+                EconomyResponse res = depositCurrencyPlayer(target, currency, amount);
+                return res.transactionSuccess();
+            } else if (plugin.getConfig().getBoolean("mailbox.enabled", true) && Vault.getMailboxManager() != null) {
+                Vault.getMailboxManager().sendOfflineMail(targetUuid,
+                        sourceReason != null ? sourceReason : "System",
+                        sourceReason != null ? sourceReason : "Offline Payment", amount,
+                        currency != null ? currency : "default");
+                return true;
+            } else {
+                EconomyResponse res = depositCurrencyPlayer(target, currency, amount);
+                return res.transactionSuccess();
+            }
         }, asyncExecutor);
     }
 
@@ -1834,10 +1081,15 @@ public class OptimizedEconomy
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
             if (player == null || subscriptionId == null || amount <= 0 || intervalMs <= 0)
                 return false;
-            SubscriptionDetails sub = new SubscriptionDetails(subscriptionId, player.getUniqueId(),
-                    currency == null ? "default" : currency, amount, intervalMs,
-                    System.currentTimeMillis() + intervalMs);
-            activeSubscriptions.put(subscriptionId, sub);
+            var fm = failover();
+            if (fm == null) return false;
+            int intervalHours = (int) Math.max(1, intervalMs / 3600000L);
+            long now = System.currentTimeMillis();
+            long nextBilling = now + intervalMs;
+            LocalFailoverManager.SubscriptionRecord sub = new LocalFailoverManager.SubscriptionRecord(
+                    subscriptionId, player.getUniqueId(), "SYSTEM", "SYSTEM", amount,
+                    currency == null ? "default" : currency, intervalHours, now, nextBilling, "ACTIVE", now);
+            fm.saveSubscription(sub);
             return true;
         }, asyncExecutor);
     }
@@ -1847,7 +1099,10 @@ public class OptimizedEconomy
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
             if (subscriptionId == null)
                 return false;
-            return activeSubscriptions.remove(subscriptionId) != null;
+            var fm = failover();
+            if (fm == null) return false;
+            fm.deleteSubscription(subscriptionId);
+            return true;
         }, asyncExecutor);
     }
 
@@ -1856,69 +1111,45 @@ public class OptimizedEconomy
     @Override
     public java.util.concurrent.CompletableFuture<Double> getTotalSupplyAsync(String currency) {
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-            if (net.milkbowl.vault.Vault.getFailoverManager() != null) {
-                return net.milkbowl.vault.Vault.getFailoverManager()
-                        .getTotalMoneySupply(currency == null ? "default" : currency);
-            }
-            return 0.0;
+            var fm = failover();
+            return fm != null ? fm.getTotalMoneySupply(currency == null ? "default" : currency) : 0.0;
         }, asyncExecutor);
     }
 
     @Override
     public java.util.concurrent.CompletableFuture<Double> getAverageBalanceAsync(String currency) {
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-            if (net.milkbowl.vault.Vault.getFailoverManager() != null) {
-                return net.milkbowl.vault.Vault.getFailoverManager()
-                        .getAverageAccountBalance(currency == null ? "default" : currency);
-            }
-            return 0.0;
+            var fm = failover();
+            return fm != null ? fm.getAverageAccountBalance(currency == null ? "default" : currency) : 0.0;
         }, asyncExecutor);
     }
 
     @Override
     public java.util.concurrent.CompletableFuture<Double> getVolume24hAsync(String currency) {
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-            if (net.milkbowl.vault.Vault.getFailoverManager() != null) {
-                return net.milkbowl.vault.Vault.getFailoverManager()
-                        .getTransactionVolume24h(currency == null ? "default" : currency);
-            }
-            return 0.0;
+            var fm = failover();
+            return fm != null ? fm.getTransactionVolume24h(currency == null ? "default" : currency) : 0.0;
         }, asyncExecutor);
     }
 
     @Override
     public boolean registerCurrency(String currency, CustomCurrencyProvider provider) {
-        if (currency == null || provider == null)
-            return false;
-        customProviders.put(currency.toLowerCase(), provider);
-        return true;
+        return currencyService.registerCurrency(currency, provider);
     }
 
     @Override
     public boolean registerCurrency(String currency, String symbol, double startingBalance, double exchangeRate) {
-        if (currency == null || currency.trim().isEmpty())
-            return false;
-        String key = currency.toLowerCase().trim();
-        nativeRegisteredCurrencies.put(key,
-                new NativeCurrencyConfig(key, symbol == null ? "$" : symbol, startingBalance, exchangeRate));
-        return true;
+        return currencyService.registerCurrency(currency, symbol, startingBalance, exchangeRate);
     }
 
     @Override
     public boolean unregisterCurrency(String currency) {
-        if (currency == null)
-            return false;
-        String key = currency.toLowerCase().trim();
-        boolean removedProvider = customProviders.remove(key) != null;
-        boolean removedNative = nativeRegisteredCurrencies.remove(key) != null;
-        return removedProvider || removedNative;
+        return currencyService.unregisterCurrency(currency);
     }
 
     @Override
     public java.util.List<String> getRegisteredCustomCurrencies() {
-        java.util.Set<String> all = new java.util.HashSet<>(customProviders.keySet());
-        all.addAll(nativeRegisteredCurrencies.keySet());
-        return new java.util.ArrayList<>(all);
+        return currencyService.getRegisteredCustomCurrencies();
     }
 
     @Override
@@ -1933,8 +1164,9 @@ public class OptimizedEconomy
             UUID playerUuid, int limit) {
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
             java.util.List<AuditLogEntry> logs = new java.util.ArrayList<>();
-            if (playerUuid != null && net.milkbowl.vault.Vault.getFailoverManager() != null) {
-                var records = net.milkbowl.vault.Vault.getFailoverManager().getPlayerTransactions(playerUuid, 1, limit);
+            var fm = failover();
+            if (playerUuid != null && fm != null) {
+                var records = fm.getPlayerTransactions(playerUuid, 1, limit);
                 if (records != null) {
                     for (var r : records) {
                         UUID u = r.uuid != null ? UUID.fromString(r.uuid) : playerUuid;
@@ -1946,13 +1178,6 @@ public class OptimizedEconomy
         }, asyncExecutor);
     }
 
-    private long getEffectiveTtl() {
-        net.milkbowl.vault.redis.VaultRedisManager redis = net.milkbowl.vault.redis.VaultRedisManager.getInstance();
-        if (redis != null && redis.isOnline()) {
-            return Math.max(onlineCacheTtlMs, 30000L);
-        }
-        return onlineCacheTtlMs;
-    }
 
     // ==========================================
     // VaultCheckAPI Implementation
@@ -1978,49 +1203,18 @@ public class OptimizedEconomy
 
     @Override
     public boolean isCheck(org.bukkit.inventory.ItemStack item) {
-        if (!plugin.getConfig().getBoolean("checks.enabled", true))
-            return false;
-        if (item == null || !item.hasItemMeta() || !item.getItemMeta().hasLore())
-            return false;
-        var lore = item.getItemMeta().getLore();
-        return lore != null && lore.stream().anyMatch(l -> l.contains("[VaultX Check]"));
+        return bankCheckService.isCheck(item);
     }
 
     @Override
     public CheckDetails getCheckDetails(org.bukkit.inventory.ItemStack item) {
-        if (!plugin.getConfig().getBoolean("checks.enabled", true) || !isCheck(item))
-            return null;
-        var lore = item.getItemMeta().getLore();
-        double amt = 0;
-        String curr = "default";
-        if (lore != null) {
-            for (String line : lore) {
-                if (line.contains("Amount: ")) {
-                    try {
-                        amt = Double.parseDouble(line.split("Amount: ")[1].replace("§a", "").trim());
-                    } catch (Exception ignored) {
-                    }
-                } else if (line.contains("Currency: ")) {
-                    curr = line.split("Currency: ")[1].replace("§e", "").trim();
-                }
-            }
-        }
-        return new CheckDetails(UUID.randomUUID().toString(), "Server Bank", curr, amt, System.currentTimeMillis());
+        return bankCheckService.getCheckDetails(item);
     }
 
     @Override
     public java.util.concurrent.CompletableFuture<EconomyResponse> redeemCheckAsync(OfflinePlayer player,
             org.bukkit.inventory.ItemStack item) {
-        if (!plugin.getConfig().getBoolean("checks.enabled", true)) {
-            return java.util.concurrent.CompletableFuture.completedFuture(new EconomyResponse(0, 0,
-                    EconomyResponse.ResponseType.FAILURE, "Checks feature is disabled in config.yml"));
-        }
-        CheckDetails details = getCheckDetails(item);
-        if (details == null) {
-            return java.util.concurrent.CompletableFuture.completedFuture(
-                    new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Invalid bank check"));
-        }
-        return depositPlayerAsync(player, details.amount());
+        return bankCheckService.redeemCheckAsync(player, item);
     }
 
     // ==========================================
@@ -2028,120 +1222,74 @@ public class OptimizedEconomy
     // ==========================================
     @Override
     public java.util.concurrent.CompletableFuture<Integer> getCreditScoreAsync(OfflinePlayer player) {
-        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-            double bal = getBalance(player);
-            int score = 650 + (int) Math.min(200, bal / 1000.0);
-            return Math.min(850, Math.max(300, score));
-        }, asyncExecutor);
+        return loanEconomyService.getCreditScoreAsync(player);
     }
 
     @Override
     public java.util.concurrent.CompletableFuture<EconomyResponse> takeLoanAsync(OfflinePlayer player, String currency,
             double amount, int durationDays, double interestRate) {
-        if (!plugin.getConfig().getBoolean("loans.enabled", true)) {
-            return java.util.concurrent.CompletableFuture.completedFuture(new EconomyResponse(0, 0,
-                    EconomyResponse.ResponseType.FAILURE, "Loans feature is disabled in config.yml"));
-        }
-        return depositCurrencyPlayerAsync(player, currency, amount);
+        return loanEconomyService.takeLoanAsync(player, currency, amount, durationDays, interestRate);
     }
 
     @Override
     public java.util.concurrent.CompletableFuture<EconomyResponse> repayLoanAsync(OfflinePlayer player, String loanId,
             double amount) {
-        if (!plugin.getConfig().getBoolean("loans.enabled", true)) {
-            return java.util.concurrent.CompletableFuture.completedFuture(new EconomyResponse(0, 0,
-                    EconomyResponse.ResponseType.FAILURE, "Loans feature is disabled in config.yml"));
-        }
-        return withdrawPlayerAsync(player, amount);
+        return loanEconomyService.repayLoanAsync(player, loanId, amount);
     }
 
     @Override
     public java.util.concurrent.CompletableFuture<java.util.List<LoanDetails>> getActiveLoansAsync(
             OfflinePlayer player) {
-        return java.util.concurrent.CompletableFuture.completedFuture(java.util.List.of());
+        return loanEconomyService.getActiveLoansAsync(player);
     }
 
     // ==========================================
     // VaultInflationAPI Implementation
     // ==========================================
-    private final Map<String, Double> inflationRates = new ConcurrentHashMap<>();
-    private final Map<String, Double> taxRates = new ConcurrentHashMap<>();
-
     @Override
     public double getInflationRate(String currency) {
-        return inflationRates.getOrDefault(currency, 1.0);
+        return wealthTaxManager.getInflationRate(currency);
     }
 
     @Override
     public void setInflationRate(String currency, double multiplier) {
-        if (currency != null) {
-            double old = inflationRates.getOrDefault(currency, 1.0);
-            inflationRates.put(currency, multiplier);
-            Bukkit.getPluginManager().callEvent(new VaultInflationUpdateEvent(currency, old, multiplier, 0.0, 0.0));
-        }
+        wealthTaxManager.setInflationRate(currency, multiplier);
     }
 
     @Override
     public double getTransactionTaxRate(String currency) {
-        return taxRates.getOrDefault(currency, 0.0);
+        return wealthTaxManager.getTransactionTaxRate(currency);
     }
 
     @Override
     public void setTransactionTaxRate(String currency, double taxPercentage) {
-        if (currency != null)
-            taxRates.put(currency, taxPercentage);
+        wealthTaxManager.setTransactionTaxRate(currency, taxPercentage);
     }
 
     @Override
     public java.util.concurrent.CompletableFuture<Double> applyProgressiveWealthTaxAsync(String currency,
             double taxPercentage) {
-        return java.util.concurrent.CompletableFuture.completedFuture(0.0);
+        return wealthTaxManager.applyProgressiveWealthTaxAsync(currency, taxPercentage);
     }
 
     // ==========================================
     // VaultMilestoneAPI Implementation
     // ==========================================
-    private final Map<String, Milestone> registeredMilestones = new ConcurrentHashMap<>();
-
     @Override
     public void registerMilestone(Milestone milestone) {
-        if (milestone != null && plugin.getConfig().getBoolean("milestones.enabled", true)) {
-            registeredMilestones.put(milestone.milestoneId(), milestone);
-        }
+        milestoneService.registerMilestone(milestone);
     }
 
     @Override
     public java.util.concurrent.CompletableFuture<java.util.List<String>> getPlayerMilestonesAsync(
             OfflinePlayer player) {
-        return java.util.concurrent.CompletableFuture.completedFuture(java.util.List.of());
+        return milestoneService.getPlayerMilestonesAsync(player);
     }
 
     @Override
     public java.util.concurrent.CompletableFuture<Boolean> hasReachedMilestoneAsync(OfflinePlayer player,
             String milestoneId) {
-        if (!plugin.getConfig().getBoolean("milestones.enabled", true)) {
-            return java.util.concurrent.CompletableFuture.completedFuture(false);
-        }
-        Milestone m = registeredMilestones.get(milestoneId);
-        if (m == null)
-            return java.util.concurrent.CompletableFuture.completedFuture(false);
-        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-            boolean reached = getBalance(player) >= m.requiredBalance();
-            if (reached) {
-                boolean broadcast = plugin.getConfig().getBoolean("milestones.broadcast-achievements", true);
-                if (broadcast && player.isOnline() && player.getPlayer() != null) {
-                    String msg = net.milkbowl.vault.Vault
-                            .getMessage("milestones.reached",
-                                    "&a&l[Achievement] &fPlayer &e%player% &freached milestone &e%name%!")
-                            .replace("%player%", player.getName() != null ? player.getName() : "Player")
-                            .replace("%name%", m.milestoneId());
-                    Bukkit.broadcastMessage(msg);
-                }
-                Bukkit.getPluginManager()
-                        .callEvent(new VaultMilestoneReachedEvent(player, m.currency(), m.requiredBalance(), ""));
-            }
-            return reached;
-        }, asyncExecutor);
+        return milestoneService.hasReachedMilestoneAsync(player, milestoneId, this::getBalance);
     }
 
     // ==========================================
@@ -2218,43 +1366,24 @@ public class OptimizedEconomy
     // ==========================================
     // VaultTaxAPI Implementation
     // ==========================================
-    private final Map<String, VaultTaxAPI.TaxRule> taxRules = new ConcurrentHashMap<>();
-
     @Override
     public java.util.concurrent.CompletableFuture<Boolean> registerTaxRuleAsync(VaultTaxAPI.TaxRule rule) {
-        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-            if (rule == null || rule.taxId() == null)
-                return false;
-            taxRules.put(rule.taxId(), rule);
-            return true;
-        }, asyncExecutor);
+        return wealthTaxManager.registerTaxRuleAsync(rule, asyncExecutor);
     }
 
     @Override
     public java.util.concurrent.CompletableFuture<Boolean> unregisterTaxRuleAsync(String taxId) {
-        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-            if (taxId == null)
-                return false;
-            return taxRules.remove(taxId) != null;
-        }, asyncExecutor);
+        return wealthTaxManager.unregisterTaxRuleAsync(taxId, asyncExecutor);
     }
 
     @Override
     public double calculateTax(String regionOrWorld, String currency, double amount) {
-        if (amount <= 0)
-            return 0.0;
-        double totalTax = 0.0;
-        for (VaultTaxAPI.TaxRule rule : taxRules.values()) {
-            if (rule.regionOrWorld().equalsIgnoreCase(regionOrWorld) && rule.currency().equalsIgnoreCase(currency)) {
-                totalTax += (amount * (rule.percentageRate() / 100.0)) + rule.fixedFee();
-            }
-        }
-        return totalTax;
+        return wealthTaxManager.calculateTax(regionOrWorld, currency, amount);
     }
 
     @Override
     public java.util.concurrent.CompletableFuture<Map<String, VaultTaxAPI.TaxRule>> getActiveTaxRulesAsync() {
-        return java.util.concurrent.CompletableFuture.completedFuture(new java.util.HashMap<>(taxRules));
+        return wealthTaxManager.getActiveTaxRulesAsync();
     }
 
     // ==========================================
@@ -2283,30 +1412,16 @@ public class OptimizedEconomy
             String snapshotId = "snap_" + System.currentTimeMillis() + "_"
                     + java.util.UUID.randomUUID().toString().substring(0, 6);
             long timestamp = System.currentTimeMillis();
-
-            Map<UUID, Map<String, Double>> snapshotBalances = new HashMap<>();
             java.util.List<String> currencies = getSupportedCurrencies();
 
-            for (Map.Entry<UUID, Map<String, CacheEntry>> entry : balanceCache.entrySet()) {
-                UUID uuid = entry.getKey();
-                for (Map.Entry<String, CacheEntry> cEntry : entry.getValue().entrySet()) {
-                    snapshotBalances.computeIfAbsent(uuid, k -> new HashMap<>()).put(cEntry.getKey().toLowerCase(),
-                            cEntry.getValue().balance);
-                }
-            }
+            // Collecte des soldes en cache via BalanceCacheManager (respecte l'encapsulation)
+            Map<UUID, Map<String, Double>> snapshotBalances = balanceCacheManager.collectAllCachedBalances();
 
-            for (Map.Entry<UUID, Map<String, CacheEntry>> entry : offlineBalanceCache.entrySet()) {
-                UUID uuid = entry.getKey();
-                for (Map.Entry<String, CacheEntry> cEntry : entry.getValue().entrySet()) {
-                    snapshotBalances.computeIfAbsent(uuid, k -> new HashMap<>())
-                            .putIfAbsent(cEntry.getKey().toLowerCase(), cEntry.getValue().balance);
-                }
-            }
-
-            net.milkbowl.vault.redis.LocalFailoverManager failover = net.milkbowl.vault.Vault.getFailoverManager();
-            if (failover != null) {
+            // Enrichissement depuis le stockage persistant
+            var fm = failover();
+            if (fm != null) {
                 for (String curr : currencies) {
-                    Map<UUID, Double> topMap = failover.getTopBalances(curr, 10000);
+                    Map<UUID, Double> topMap = fm.getTopBalances(curr, 10000);
                     if (topMap != null) {
                         for (Map.Entry<UUID, Double> tEntry : topMap.entrySet()) {
                             snapshotBalances.computeIfAbsent(tEntry.getKey(), k -> new HashMap<>())
@@ -2320,15 +1435,13 @@ public class OptimizedEconomy
             double totalNetWorth = 0.0;
             for (Map<String, Double> pBals : snapshotBalances.values()) {
                 for (Double val : pBals.values()) {
-                    if (val != null && val > 0) {
-                        totalNetWorth += val;
-                    }
+                    if (val != null && val > 0) totalNetWorth += val;
                 }
             }
 
-            if (failover != null) {
-                failover.createSnapshot(snapshotId, label != null ? label : "Snapshot " + snapshotId, timestamp,
-                        totalAccounts, totalNetWorth, snapshotBalances);
+            if (fm != null) {
+                fm.createSnapshot(snapshotId, label != null ? label : "Snapshot " + snapshotId,
+                        timestamp, totalAccounts, totalNetWorth, snapshotBalances);
             }
 
             return new VaultSnapshotAPI.EconomySnapshot(snapshotId, timestamp,
@@ -2339,29 +1452,22 @@ public class OptimizedEconomy
     @Override
     public java.util.concurrent.CompletableFuture<Boolean> restoreServerSnapshotAsync(String snapshotId) {
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-            if (snapshotId == null)
-                return false;
-            net.milkbowl.vault.redis.LocalFailoverManager failover = net.milkbowl.vault.Vault.getFailoverManager();
-            if (failover == null)
-                return false;
+            if (snapshotId == null) return false;
+            var fm = failover();
+            if (fm == null) return false;
 
-            Map<UUID, Map<String, Double>> snapshotBalances = failover.getSnapshotBalances(snapshotId);
-            if (snapshotBalances.isEmpty())
-                return false;
+            Map<UUID, Map<String, Double>> snapshotBalances = fm.getSnapshotBalances(snapshotId);
+            if (snapshotBalances.isEmpty()) return false;
 
-            balanceCache.clear();
-            offlineBalanceCache.clear();
+            balanceCacheManager.getBalanceCache().clear();
+            balanceCacheManager.getOfflineBalanceCache().clear();
 
             for (Map.Entry<UUID, Map<String, Double>> entry : snapshotBalances.entrySet()) {
-                UUID playerUuid = entry.getKey();
-                OfflinePlayer op = Bukkit.getOfflinePlayer(playerUuid);
+                OfflinePlayer op = Bukkit.getOfflinePlayer(entry.getKey());
                 for (Map.Entry<String, Double> bEntry : entry.getValue().entrySet()) {
-                    String curr = bEntry.getKey();
-                    double bal = bEntry.getValue();
-                    saveCustomCurrencyBalance(op, curr, bal);
+                    saveCustomCurrencyBalance(op, bEntry.getKey(), bEntry.getValue());
                 }
             }
-
             return true;
         }, asyncExecutor);
     }
@@ -2370,24 +1476,20 @@ public class OptimizedEconomy
     public java.util.concurrent.CompletableFuture<Boolean> restorePlayerSnapshotAsync(UUID playerUuid,
             String snapshotId) {
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-            if (playerUuid == null || snapshotId == null)
-                return false;
-            net.milkbowl.vault.redis.LocalFailoverManager failover = net.milkbowl.vault.Vault.getFailoverManager();
-            if (failover == null)
-                return false;
+            if (playerUuid == null || snapshotId == null) return false;
+            var fm = failover();
+            if (fm == null) return false;
 
-            Map<String, Double> playerBals = failover.getPlayerSnapshotBalances(playerUuid, snapshotId);
-            if (playerBals.isEmpty())
-                return false;
+            Map<String, Double> playerBals = fm.getPlayerSnapshotBalances(playerUuid, snapshotId);
+            if (playerBals.isEmpty()) return false;
 
-            balanceCache.remove(playerUuid);
-            offlineBalanceCache.remove(playerUuid);
+            balanceCacheManager.getBalanceCache().remove(playerUuid);
+            balanceCacheManager.getOfflineBalanceCache().remove(playerUuid);
 
             OfflinePlayer op = Bukkit.getOfflinePlayer(playerUuid);
             for (Map.Entry<String, Double> entry : playerBals.entrySet()) {
                 saveCustomCurrencyBalance(op, entry.getKey(), entry.getValue());
             }
-
             return true;
         }, asyncExecutor);
     }
@@ -2396,24 +1498,17 @@ public class OptimizedEconomy
     public java.util.concurrent.CompletableFuture<java.util.List<VaultSnapshotAPI.EconomySnapshot>> getSnapshotsAsync(
             int limit) {
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-            net.milkbowl.vault.redis.LocalFailoverManager failover = net.milkbowl.vault.Vault.getFailoverManager();
-            if (failover != null) {
-                return failover.getSnapshotsFromDb(limit);
-            }
-            return java.util.Collections.emptyList();
+            var fm = failover();
+            return fm != null ? fm.getSnapshotsFromDb(limit) : java.util.Collections.emptyList();
         }, asyncExecutor);
     }
 
     @Override
     public java.util.concurrent.CompletableFuture<Boolean> deleteSnapshotAsync(String snapshotId) {
         return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-            if (snapshotId == null)
-                return false;
-            net.milkbowl.vault.redis.LocalFailoverManager failover = net.milkbowl.vault.Vault.getFailoverManager();
-            if (failover != null) {
-                return failover.deleteSnapshotFromDb(snapshotId);
-            }
-            return false;
+            if (snapshotId == null) return false;
+            var fm = failover();
+            return fm != null && fm.deleteSnapshotFromDb(snapshotId);
         }, asyncExecutor);
     }
 

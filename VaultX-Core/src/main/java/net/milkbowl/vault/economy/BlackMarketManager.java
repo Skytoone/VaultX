@@ -1,15 +1,9 @@
 package net.milkbowl.vault.economy;
 
-import org.bukkit.ChatColor;
-import org.bukkit.Material;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 
 import java.security.SecureRandom;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,8 +20,7 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
     private final SecureRandom random = new SecureRandom();
     private final Map<UUID, Double> dirtyBalances = new ConcurrentHashMap<>();
     private final StripedLock stripedLock = new StripedLock();
-
-    private static final String DIRTY_LORE_MARKER = "§8[vaultx:dirty_money]";
+    private final BlackMarketItemHandler itemHandler;
 
     private java.util.concurrent.locks.ReentrantLock getPlayerLock(UUID uuid) {
         return stripedLock.getLock(uuid);
@@ -42,6 +35,7 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
 
     public BlackMarketManager(Plugin plugin) {
         this.plugin = plugin;
+        this.itemHandler = new BlackMarketItemHandler(plugin);
         loadAllFromDb();
     }
 
@@ -78,7 +72,7 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
         if (player == null)
             return 0.0;
         if (getMode().equals("ITEM")) {
-            return countDirtyItems(player);
+            return itemHandler.countDirtyItems(player);
         } else {
             return getOrLoadDirtyBalance(player.getUniqueId());
         }
@@ -107,7 +101,7 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
         if (player == null || Double.isNaN(amount) || Double.isInfinite(amount) || amount <= 0)
             return;
         if (getMode().equals("ITEM")) {
-            giveDirtyItem(player, amount);
+            itemHandler.giveDirtyItem(player, amount);
         } else {
             double current = getOrLoadDirtyBalance(player.getUniqueId());
             double val = current + amount;
@@ -124,7 +118,7 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
             return false;
 
         if (getMode().equals("ITEM")) {
-            return removeDirtyItems(player, amount);
+            return itemHandler.removeDirtyItems(player, amount);
         } else {
             double val = current - amount;
             dirtyBalances.put(player.getUniqueId(), val);
@@ -138,7 +132,7 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
         if (player == null || Double.isNaN(amount) || Double.isInfinite(amount) || amount <= 0)
             return;
         if (player.isOnline() && player.getPlayer() != null && getMode().equals("ITEM")) {
-            giveDirtyItem(player.getPlayer(), amount);
+            itemHandler.giveDirtyItem(player.getPlayer(), amount);
         } else {
             double current = getOrLoadDirtyBalance(player.getUniqueId());
             double val = current + amount;
@@ -173,7 +167,6 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
         double feePercent = plugin.getConfig().getDouble("blackmarket.laundering-fee-percent", 20.0);
         double seizureRisk = plugin.getConfig().getDouble("blackmarket.seizure-risk-percent", 5.0);
 
-        // Synchronized per-player to prevent race condition / double-spend exploit
         synchronized (getPlayerLock(player.getUniqueId())) {
             if (getMode().equals("ITEM")) {
                 int items = (int) Math.ceil(dirtyAmount / 100.0);
@@ -189,7 +182,6 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
                 return new LaunderingResult(false, false, 0, 0, 0);
             }
 
-            // Determine outcome AFTER the dirty money is already withdrawn
             boolean isSeized = (random.nextDouble() * 100.0) < seizureRisk;
 
             if (isSeized) {
@@ -205,117 +197,6 @@ public class BlackMarketManager implements VaultBlackMarketAPI {
 
             return new LaunderingResult(true, false, dirtyAmount, cleanReceived, fee);
         }
-    }
-
-    private double countDirtyItems(Player player) {
-        double count = 0;
-        String matName = plugin.getConfig().getString("blackmarket.item.material", "PAPER");
-        Material mat = Material.matchMaterial(matName);
-        if (mat == null)
-            mat = Material.PAPER;
-
-        for (ItemStack item : player.getInventory().getContents()) {
-            if (item != null && item.getType() == mat && item.hasItemMeta()) {
-                ItemMeta meta = item.getItemMeta();
-                // Use hidden lore marker to prevent display-name rename exploit
-                if (meta != null && isDirtyMoneyItem(meta)) {
-                    count += item.getAmount() * 100.0; // 1 item = 100$ dirty money value
-                }
-            }
-        }
-        return count;
-    }
-
-    private void giveDirtyItem(Player player, double amount) {
-        String matName = plugin.getConfig().getString("blackmarket.item.material", "PAPER");
-        Material mat = Material.matchMaterial(matName);
-        if (mat == null)
-            mat = Material.PAPER;
-
-        int itemCount = (int) Math.floor(amount / 100.0);
-        if (itemCount <= 0) return;
-
-        int maxStack = mat.getMaxStackSize() > 0 ? mat.getMaxStackSize() : 64;
-
-        while (itemCount > 0) {
-            int stackSize = Math.min(itemCount, maxStack);
-            ItemStack item = new ItemStack(mat, stackSize);
-            ItemMeta meta = item.getItemMeta();
-            if (meta != null) {
-                String title = plugin.getConfig().getString("blackmarket.item.name", "&c&lMarked Dirty Money");
-                meta.setDisplayName(ChatColor.translateAlternateColorCodes('&', title));
-                List<String> rawLore = plugin.getConfig().getStringList("blackmarket.item.lore");
-                List<String> lore = new ArrayList<>();
-                for (String l : rawLore) {
-                    lore.add(ChatColor.translateAlternateColorCodes('&', l));
-                }
-                // Append hidden marker lore line to prevent rename exploits via anvil
-                lore.add(DIRTY_LORE_MARKER);
-                meta.setLore(lore);
-                int cmd = plugin.getConfig().getInt("blackmarket.item.custom-model-data", 1001);
-                if (cmd > 0) {
-                    try {
-                        java.lang.reflect.Method m = meta.getClass().getMethod("setCustomModelData", Integer.class);
-                        m.invoke(meta, cmd);
-                    } catch (Throwable ignored) {
-                    }
-                }
-                item.setItemMeta(meta);
-            }
-
-            Map<Integer, ItemStack> leftover = player.getInventory().addItem(item);
-            for (ItemStack left : leftover.values()) {
-                player.getWorld().dropItemNaturally(player.getLocation(), left);
-            }
-            itemCount -= stackSize;
-        }
-    }
-
-    private boolean removeDirtyItems(Player player, double amount) {
-        String matName = plugin.getConfig().getString("blackmarket.item.material", "PAPER");
-        Material mat = Material.matchMaterial(matName);
-        if (mat == null)
-            mat = Material.PAPER;
-
-        int itemsToRemove = (int) Math.ceil(amount / 100.0);
-        if (itemsToRemove <= 0) return false;
-
-        // Ensure player has sufficient total items before modifying inventory
-        if (countDirtyItems(player) < itemsToRemove * 100.0) {
-            return false;
-        }
-
-        ItemStack[] contents = player.getInventory().getContents();
-        for (int i = 0; i < contents.length; i++) {
-            ItemStack item = contents[i];
-            if (item != null && item.getType() == mat && item.hasItemMeta()) {
-                ItemMeta meta = item.getItemMeta();
-                if (meta != null && isDirtyMoneyItem(meta)) {
-                    int count = item.getAmount();
-                    if (count <= itemsToRemove) {
-                        itemsToRemove -= count;
-                        player.getInventory().setItem(i, null);
-                    } else {
-                        item.setAmount(count - itemsToRemove);
-                        itemsToRemove = 0;
-                    }
-                    if (itemsToRemove <= 0)
-                        break;
-                }
-            }
-        }
-        return itemsToRemove <= 0;
-    }
-
-    /**
-     * Checks for the hidden lore marker to identify legitimate dirty money items.
-     * Using the display name alone is exploitable via anvil renaming.
-     */
-    private boolean isDirtyMoneyItem(ItemMeta meta) {
-        if (!meta.hasLore())
-            return false;
-        List<String> lore = meta.getLore();
-        return lore != null && lore.contains(DIRTY_LORE_MARKER);
     }
 
     public void cleanupPlayer(UUID uuid) {

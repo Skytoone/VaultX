@@ -4,38 +4,37 @@ import net.milkbowl.vault.Vault;
 import net.milkbowl.vault.economy.Economy;
 import net.milkbowl.vault.economy.MultiCurrencyEconomy;
 import net.milkbowl.vault.economy.EconomyResponse;
+import net.milkbowl.vault.economy.VaultEscrowAPI;
+import net.milkbowl.vault.economy.events.VaultEscrowCreateEvent;
+import net.milkbowl.vault.persistence.repository.EscrowRepository;
+
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
-import redis.clients.jedis.Jedis;
-
-import net.milkbowl.vault.economy.VaultEscrowAPI;
-import net.milkbowl.vault.economy.events.VaultEscrowCreateEvent;
 
 import java.util.UUID;
 import java.util.List;
 import java.util.ArrayList;
-import java.util.Map;
-import java.util.HashMap;
 
 public class EscrowManager implements VaultEscrowAPI {
 
     private final Plugin plugin;
-    private final LocalFailoverManager failoverManager;
-    private org.bukkit.scheduler.BukkitTask autoRefundTask;
+    private final EscrowRepository escrowRepository;
+    private final EscrowExpirationEngine expirationEngine;
     private final java.util.Set<String> processingEscrows = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public EscrowManager(Plugin plugin) {
         this.plugin = plugin;
-        this.failoverManager = Vault.getFailoverManager();
-        startAutoRefundScheduler();
+        LocalFailoverManager failoverManager = Vault.getFailoverManager();
+        this.escrowRepository = new EscrowRepository(plugin, failoverManager);
+        this.expirationEngine = new EscrowExpirationEngine(plugin, this, failoverManager);
+        this.expirationEngine.start();
     }
 
     public void close() {
-        if (autoRefundTask != null) {
-            autoRefundTask.cancel();
-            autoRefundTask = null;
+        if (expirationEngine != null) {
+            expirationEngine.close();
         }
         processingEscrows.clear();
     }
@@ -65,43 +64,10 @@ public class EscrowManager implements VaultEscrowAPI {
     }
 
     public EscrowDetails getEscrow(String escrowId) {
-        VaultRedisManager redis = getRedisManager();
-        if (redis != null && redis.isOnline()) {
-            try (Jedis jedis = redis.getPool().getResource()) {
-                String key = "vaultx:escrows:" + escrowId;
-                if (jedis.exists(key)) {
-                    Map<String, String> data = jedis.hgetAll(key);
-                    if (data != null && !data.isEmpty()) {
-                        return new EscrowDetails(
-                                escrowId,
-                                UUID.fromString(data.get("sender")),
-                                UUID.fromString(data.get("receiver")),
-                                Double.parseDouble(data.get("amount")),
-                                data.get("currency"),
-                                data.get("status"),
-                                Long.parseLong(data.get("timeout_at"))
-                        );
-                    }
-                }
-            } catch (Exception e) {
-                plugin.getLogger().warning("[VaultX Escrow] Failed to fetch escrow " + escrowId + " from Redis: " + e.getMessage());
-            }
-        }
-
-        // Fallback to SQLite/MySQL
-        LocalFailoverManager.LocalEscrowRecord localRecord = failoverManager.getLocalEscrow(escrowId);
-        if (localRecord != null) {
-            return new EscrowDetails(
-                    localRecord.id,
-                    UUID.fromString(localRecord.sender),
-                    UUID.fromString(localRecord.receiver),
-                    localRecord.amount,
-                    localRecord.currency,
-                    localRecord.status,
-                    localRecord.timeoutAt
-            );
-        }
-        return null;
+        VaultEscrowAPI.EscrowDetails d = escrowRepository.getEscrow(escrowId);
+        if (d == null) return null;
+        if (d instanceof EscrowDetails) return (EscrowDetails) d;
+        return new EscrowDetails(d.id, d.sender, d.receiver, d.amount, d.currency, d.status, d.timeoutAt);
     }
 
     public java.util.concurrent.CompletableFuture<VaultEscrowAPI.EscrowResult> startEscrow(Player sender, OfflinePlayer receiver, double amount, String currency, long timeoutSec) {
@@ -185,29 +151,10 @@ public class EscrowManager implements VaultEscrowAPI {
                     return;
                 }
 
-                String escrowId = UUID.randomUUID().toString().substring(0, 8); // Shorter ID for commands
+                String escrowId = UUID.randomUUID().toString().substring(0, 8);
                 long timeoutAt = System.currentTimeMillis() + (actualTimeoutSec * 1000L);
                 
-                failoverManager.saveLocalEscrow(escrowId, sender.getUniqueId(), receiver.getUniqueId(), finalAmountParam, safeCurrency, "PENDING", timeoutAt);
-
-                if (redis != null && redis.isOnline()) {
-                    try (Jedis jedis = redis.getPool().getResource()) {
-                        String key = "vaultx:escrows:" + escrowId;
-                        Map<String, String> data = new HashMap<>();
-                        data.put("sender", sender.getUniqueId().toString());
-                        data.put("receiver", receiver.getUniqueId().toString());
-                        data.put("amount", String.valueOf(finalAmountParam));
-                        data.put("currency", safeCurrency.toLowerCase());
-                        data.put("status", "PENDING");
-                        data.put("timeout_at", String.valueOf(timeoutAt));
-                        jedis.hset(key, data);
-                        jedis.sadd("vaultx:player_escrows:" + sender.getUniqueId().toString(), escrowId);
-                        jedis.sadd("vaultx:player_escrows:" + receiver.getUniqueId().toString(), escrowId);
-                        jedis.zadd("vaultx:escrows_timeout", timeoutAt, escrowId);
-                    } catch (Exception e) {
-                        plugin.getLogger().warning("[VaultX Escrow] Failed to save escrow to Redis: " + e.getMessage());
-                    }
-                }
+                escrowRepository.saveEscrow(escrowId, sender.getUniqueId(), receiver.getUniqueId(), finalAmountParam, safeCurrency, "PENDING", timeoutAt);
 
                 future.complete(new EscrowResult(true, Vault.getMessage("escrow.started", "&aEscrow transaction successfully started."), escrowId));
             } catch (Exception e) {
@@ -242,7 +189,7 @@ public class EscrowManager implements VaultEscrowAPI {
             }
 
             try {
-                EscrowDetails escrow = getEscrow(escrowId);
+                VaultEscrowAPI.EscrowDetails escrow = getEscrow(escrowId);
                 if (escrow == null) {
                     future.complete(new EscrowResult(false, Vault.getMessage("escrow.not-found", "&cEscrow transaction not found."), null));
                     return;
@@ -260,15 +207,7 @@ public class EscrowManager implements VaultEscrowAPI {
                     return;
                 }
 
-                failoverManager.saveLocalEscrow(escrowId, escrow.sender, escrow.receiver, escrow.amount, escrow.currency, "COMPLETED", escrow.timeoutAt);
-                if (redis != null && redis.isOnline()) {
-                    try (Jedis jedis = redis.getPool().getResource()) {
-                        jedis.hset("vaultx:escrows:" + escrowId, "status", "COMPLETED");
-                        jedis.zrem("vaultx:escrows_timeout", escrowId);
-                    } catch (Exception e) {
-                        plugin.getLogger().warning("[VaultX Escrow] Failed to update status to COMPLETED in Redis: " + e.getMessage());
-                    }
-                }
+                escrowRepository.saveEscrow(escrowId, escrow.sender, escrow.receiver, escrow.amount, escrow.currency, "COMPLETED", escrow.timeoutAt);
 
                 java.util.concurrent.CompletableFuture<Boolean> depositFuture = new java.util.concurrent.CompletableFuture<>();
                 net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
@@ -300,13 +239,7 @@ public class EscrowManager implements VaultEscrowAPI {
                 if (depositFuture.join()) {
                     future.complete(new EscrowResult(true, Vault.getMessage("escrow.released-success", "&aEscrow funds successfully released to the receiver."), escrowId));
                 } else {
-                    failoverManager.saveLocalEscrow(escrowId, escrow.sender, escrow.receiver, escrow.amount, escrow.currency, "PENDING", escrow.timeoutAt);
-                    if (redis != null && redis.isOnline()) {
-                        try (Jedis jedis = redis.getPool().getResource()) {
-                            jedis.hset("vaultx:escrows:" + escrowId, "status", "PENDING");
-                            jedis.zadd("vaultx:escrows_timeout", escrow.timeoutAt, escrowId);
-                        } catch (Exception ignored) {}
-                    }
+                    escrowRepository.saveEscrow(escrowId, escrow.sender, escrow.receiver, escrow.amount, escrow.currency, "PENDING", escrow.timeoutAt);
                     future.complete(new EscrowResult(false, Vault.getMessage("escrow.release-deposit-failed", "&cFailed to deposit funds to the receiver."), null));
                 }
             } catch (Exception e) {
@@ -342,7 +275,7 @@ public class EscrowManager implements VaultEscrowAPI {
             }
 
             try {
-                EscrowDetails escrow = getEscrow(escrowId);
+                VaultEscrowAPI.EscrowDetails escrow = getEscrow(escrowId);
                 if (escrow == null) {
                     future.complete(new EscrowResult(false, Vault.getMessage("escrow.not-found", "&cEscrow transaction not found."), null));
                     return;
@@ -374,15 +307,7 @@ public class EscrowManager implements VaultEscrowAPI {
                     return;
                 }
 
-                failoverManager.saveLocalEscrow(escrowId, escrow.sender, escrow.receiver, escrow.amount, escrow.currency, "REFUNDED", escrow.timeoutAt);
-                if (redis != null && redis.isOnline()) {
-                    try (Jedis jedis = redis.getPool().getResource()) {
-                        jedis.hset("vaultx:escrows:" + escrowId, "status", "REFUNDED");
-                        jedis.zrem("vaultx:escrows_timeout", escrowId);
-                    } catch (Exception e) {
-                        plugin.getLogger().warning("[VaultX Escrow] Failed to update status to REFUNDED in Redis: " + e.getMessage());
-                    }
-                }
+                escrowRepository.saveEscrow(escrowId, escrow.sender, escrow.receiver, escrow.amount, escrow.currency, "REFUNDED", escrow.timeoutAt);
 
                 java.util.concurrent.CompletableFuture<Boolean> depositFuture = new java.util.concurrent.CompletableFuture<>();
                 net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, () -> {
@@ -406,13 +331,7 @@ public class EscrowManager implements VaultEscrowAPI {
                 if (depositFuture.join()) {
                     future.complete(new EscrowResult(true, Vault.getMessage("escrow.refunded-success", "&aEscrow funds successfully refunded to the sender."), escrowId));
                 } else {
-                    failoverManager.saveLocalEscrow(escrowId, escrow.sender, escrow.receiver, escrow.amount, escrow.currency, "PENDING", escrow.timeoutAt);
-                    if (redis != null && redis.isOnline()) {
-                        try (Jedis jedis = redis.getPool().getResource()) {
-                            jedis.hset("vaultx:escrows:" + escrowId, "status", "PENDING");
-                            jedis.zadd("vaultx:escrows_timeout", escrow.timeoutAt, escrowId);
-                        } catch (Exception ignored) {}
-                    }
+                    escrowRepository.saveEscrow(escrowId, escrow.sender, escrow.receiver, escrow.amount, escrow.currency, "PENDING", escrow.timeoutAt);
                     future.complete(new EscrowResult(false, Vault.getMessage("escrow.refund-deposit-failed", "&cFailed to refund funds to the sender."), null));
                 }
             } catch (Exception e) {
@@ -427,72 +346,15 @@ public class EscrowManager implements VaultEscrowAPI {
         return future;
     }
 
-    private void startAutoRefundScheduler() {
-        autoRefundTask = net.milkbowl.vault.util.FoliaScheduler.runTimerAsync(plugin, () -> {
-            long now = System.currentTimeMillis();
-            VaultRedisManager redis = getRedisManager();
-            if (redis != null && redis.isOnline()) {
-                try (Jedis jedis = redis.getPool().getResource()) {
-                    java.util.List<String> expiredIds = jedis.zrangeByScore("vaultx:escrows_timeout", 0, now);
-                    if (expiredIds != null && !expiredIds.isEmpty()) {
-                        for (String id : expiredIds) {
-                            refundEscrow(id, Bukkit.getConsoleSender()).thenAccept(result -> {
-                                if (result.success) {
-                                    plugin.getLogger().info("[VaultX Escrow] Auto-refunded expired escrow " + id);
-                                }
-                            });
-                        }
-                    }
-                } catch (Exception e) {
-                    plugin.getLogger().warning("[VaultX Escrow] Error in Redis auto-refund scheduler: " + e.getMessage());
-                }
-            } else {
-                List<LocalFailoverManager.LocalEscrowRecord> expired = failoverManager.getExpiredPendingLocalEscrows(now);
-                for (LocalFailoverManager.LocalEscrowRecord record : expired) {
-                    refundEscrow(record.id, Bukkit.getConsoleSender()).thenAccept(result -> {
-                        if (result.success) {
-                            plugin.getLogger().info("[VaultX Escrow] Auto-refunded expired local escrow " + record.id);
-                        }
-                    });
-                }
-            }
-        }, 600L, 600L);
-    }
-
     public java.util.concurrent.CompletableFuture<List<EscrowDetails>> listEscrows(OfflinePlayer player) {
         java.util.concurrent.CompletableFuture<List<EscrowDetails>> future = new java.util.concurrent.CompletableFuture<>();
         net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
+            List<VaultEscrowAPI.EscrowDetails> raw = escrowRepository.listEscrows(player);
             List<EscrowDetails> list = new ArrayList<>();
-            VaultRedisManager redis = getRedisManager();
-            if (redis != null && redis.isOnline()) {
-                try (Jedis jedis = redis.getPool().getResource()) {
-                    java.util.Set<String> ids = jedis.smembers("vaultx:player_escrows:" + player.getUniqueId().toString());
-                    if (ids != null) {
-                        for (String id : ids) {
-                            EscrowDetails details = getEscrow(id);
-                            if (details != null) {
-                                list.add(details);
-                            }
-                        }
-                    }
-                    future.complete(list);
-                    return;
-                } catch (Exception e) {
-                    plugin.getLogger().warning("[VaultX Escrow] Failed to list escrows from Redis: " + e.getMessage());
+            if (raw != null) {
+                for (VaultEscrowAPI.EscrowDetails d : raw) {
+                    list.add(new EscrowDetails(d.id, d.sender, d.receiver, d.amount, d.currency, d.status, d.timeoutAt));
                 }
-            }
-
-            List<LocalFailoverManager.LocalEscrowRecord> localList = failoverManager.getLocalEscrowsForPlayer(player.getUniqueId());
-            for (LocalFailoverManager.LocalEscrowRecord record : localList) {
-                list.add(new EscrowDetails(
-                        record.id,
-                        UUID.fromString(record.sender),
-                        UUID.fromString(record.receiver),
-                        record.amount,
-                        record.currency,
-                        record.status,
-                        record.timeoutAt
-                ));
             }
             future.complete(list);
         });
@@ -501,15 +363,6 @@ public class EscrowManager implements VaultEscrowAPI {
 
     @Override
     public java.util.concurrent.CompletableFuture<List<VaultEscrowAPI.EscrowDetails>> getPlayerEscrowsAsync(OfflinePlayer player) {
-        return listEscrows(player).thenApply(list -> {
-            List<VaultEscrowAPI.EscrowDetails> result = new ArrayList<>();
-            if (list != null) {
-                for (EscrowDetails e : list) {
-                    result.add(new VaultEscrowAPI.EscrowDetails(e.id, e.sender, e.receiver, e.amount, e.currency, e.status, e.timeoutAt));
-                }
-            }
-            return result;
-        });
+        return listEscrows(player).thenApply(list -> new ArrayList<>(list));
     }
 }
-

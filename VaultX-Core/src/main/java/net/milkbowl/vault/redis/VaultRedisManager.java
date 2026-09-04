@@ -81,6 +81,9 @@ public class VaultRedisManager {
     private final java.util.Random random = new java.util.Random();
 
     private final RedisPayloadEncryptor encryptor;
+    private final RedisConnectionFactory connectionFactory;
+    private final DistributedLockProvider lockProvider;
+    private final RedisPubSubService pubSubService;
 
     public VaultRedisManager(Plugin plugin, String host, int port, String password, String serverId, String channel) {
         this.plugin = plugin;
@@ -88,24 +91,14 @@ public class VaultRedisManager {
         this.syncChannel = channel;
         this.failoverManager = net.milkbowl.vault.Vault.getFailoverManager();
         this.redisExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+
+        this.connectionFactory = new RedisConnectionFactory(plugin, host, port, password);
+        this.pool = connectionFactory.getPool();
+
         String encryptionKey = plugin.getConfig().getString("redis.encryption-key", "");
-        this.encryptor = new RedisPayloadEncryptor(encryptionKey);
-
-        int maxConnections = plugin.getConfig().getInt("redis.max-connections", 16);
-        int timeoutMs = plugin.getConfig().getInt("redis.connection-timeout-ms", 250);
-
-        JedisPoolConfig config = new JedisPoolConfig();
-        config.setMaxTotal(maxConnections); // Configurable
-        config.setMaxIdle(maxConnections);
-        config.setMinIdle(Math.max(2, maxConnections / 4));
-        config.setBlockWhenExhausted(true);
-        config.setMaxWait(java.time.Duration.ofMillis(timeoutMs));
-
-        if (password != null && !password.isEmpty()) {
-            this.pool = new JedisPool(config, host, port, timeoutMs, password);
-        } else {
-            this.pool = new JedisPool(config, host, port, timeoutMs);
-        }
+        this.pubSubService = new RedisPubSubService(plugin, this.pool, channel, encryptionKey);
+        this.encryptor = pubSubService.getEncryptor();
+        this.lockProvider = new DistributedLockProvider(this.pool);
 
         instance = this;
         this.online = checkConnection();
@@ -118,6 +111,18 @@ public class VaultRedisManager {
         }
 
         plugin.getLogger().info("[VaultRedis] Redis synchronization enabled for server: " + serverId + (encryptor.isEnabled() ? " (AES Encrypted)" : ""));
+    }
+
+    public RedisConnectionFactory getConnectionFactory() {
+        return connectionFactory;
+    }
+
+    public DistributedLockProvider getLockProvider() {
+        return lockProvider;
+    }
+
+    public RedisPubSubService getPubSubService() {
+        return pubSubService;
     }
 
     public RedisPayloadEncryptor getEncryptor() {
