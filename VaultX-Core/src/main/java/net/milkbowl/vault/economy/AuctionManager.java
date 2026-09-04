@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.function.BiFunction;
 
-public class AuctionManager implements Listener {
+public class AuctionManager implements Listener, VaultAuctionAPI {
 
     private final Plugin plugin;
     private final Map<String, VaultAuctionAPI.AuctionListing> activeAuctions = new ConcurrentHashMap<>();
@@ -29,6 +29,9 @@ public class AuctionManager implements Listener {
         this.plugin = plugin;
         if (plugin != null) {
             Bukkit.getPluginManager().registerEvents(this, plugin);
+            int intervalSec = plugin.getConfig().getInt("auctions.check-interval-seconds", 30);
+            long ticks = Math.max(10, intervalSec * 20L);
+            net.milkbowl.vault.util.FoliaScheduler.runTimerAsync(plugin, this::processExpiredAuctions, ticks, ticks);
         }
         loadAllFromDb();
     }
@@ -42,12 +45,17 @@ public class AuctionManager implements Listener {
         if (failover != null) {
             Map<String, VaultAuctionAPI.AuctionListing> loaded = failover.loadAllAuctions();
             activeAuctions.putAll(loaded);
+        }
+    }
 
-            Map<UUID, List<ItemStack>> pendingLoaded = failover.loadAllPendingAuctionItems();
-            if (pendingLoaded != null) {
-                for (Map.Entry<UUID, List<ItemStack>> entry : pendingLoaded.entrySet()) {
-                    pendingClaimItems.put(entry.getKey(), new java.util.concurrent.CopyOnWriteArrayList<>(entry.getValue()));
-                }
+    private void processExpiredAuctions() {
+        long now = System.currentTimeMillis();
+        for (VaultAuctionAPI.AuctionListing listing : activeAuctions.values()) {
+            if (!listing.isClosed() && now >= listing.expiresAtMs()) {
+                settleAuctionAsync(listing.auctionId(), (p, c, amt) -> {
+                    var econ = getPrimaryEconomy();
+                    return econ != null ? econ.depositCurrencyPlayer(p, c, amt) : new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "No economy provider");
+                }, null);
             }
         }
     }
@@ -83,17 +91,26 @@ public class AuctionManager implements Listener {
         synchronized (pendingClaimItems) {
             items = pendingClaimItems.remove(uuid);
         }
+        LocalFailoverManager failover = LocalFailoverManager.getInstance();
+        if (items == null || items.isEmpty()) {
+            if (failover != null) {
+                Map<UUID, List<ItemStack>> allDbPending = failover.loadAllPendingAuctionItems();
+                if (allDbPending != null && allDbPending.containsKey(uuid)) {
+                    items = allDbPending.get(uuid);
+                }
+            }
+        }
         if (items != null && !items.isEmpty()) {
+            List<ItemStack> deliverItems = items;
             net.milkbowl.vault.util.FoliaScheduler.runEntitySync(plugin, player, () -> {
-                for (ItemStack item : items) {
+                for (ItemStack item : deliverItems) {
                     Map<Integer, ItemStack> leftover = player.getInventory().addItem(item);
                     for (ItemStack remaining : leftover.values()) {
                         player.getWorld().dropItemNaturally(player.getLocation(), remaining);
                     }
                 }
-                player.sendMessage("§a§l[Auction] §aYou received §e" + items.size() + " §aitem(s) from auction claims!");
+                player.sendMessage("§a§l[Auction] §aYou received §e" + deliverItems.size() + " §aitem(s) from auction claims!");
             });
-            LocalFailoverManager failover = LocalFailoverManager.getInstance();
             if (failover != null) {
                 net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> {
                     failover.deletePendingAuctionItems(uuid);
@@ -276,6 +293,40 @@ public class AuctionManager implements Listener {
             }
         }
         activeAuctions.clear();
+    }
+
+    @Override
+    public CompletableFuture<VaultAuctionAPI.AuctionListing> createAuctionAsync(OfflinePlayer seller, ItemStack item, String currency, double startingPrice, long durationMinutes) {
+        return createAuctionAsync(seller, item, currency, startingPrice, durationMinutes, null);
+    }
+
+    private MultiCurrencyEconomy getPrimaryEconomy() {
+        var registry = net.milkbowl.vault.Vault.getServiceRegistry();
+        return (registry != null && !registry.getWrappedEconomies().isEmpty()) ? registry.getWrappedEconomies().get(0) : null;
+    }
+
+    @Override
+    public CompletableFuture<EconomyResponse> placeBidAsync(OfflinePlayer bidder, String auctionId, double bidAmount) {
+        return placeBidAsync(bidder, auctionId, bidAmount, (p, c) -> {
+            var econ = getPrimaryEconomy();
+            return econ != null ? econ.getCurrencyBalance(p, c) : 0.0;
+        }, (p, c, amt) -> {
+            var econ = getPrimaryEconomy();
+            return econ != null ? econ.withdrawCurrencyPlayer(p, c, amt) : new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "No economy provider");
+        }, (p, c, amt) -> {
+            var econ = getPrimaryEconomy();
+            return econ != null ? econ.depositCurrencyPlayer(p, c, amt) : new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "No economy provider");
+        }, null);
+    }
+
+    @Override
+    public CompletableFuture<EconomyResponse> cancelAuctionAsync(OfflinePlayer seller, String auctionId) {
+        return cancelAuctionAsync(seller, auctionId, null);
+    }
+
+    @Override
+    public CompletableFuture<List<VaultAuctionAPI.AuctionListing>> getActiveAuctionsAsync() {
+        return getActiveAuctionsAsync((ExecutorService) null);
     }
 
     @FunctionalInterface

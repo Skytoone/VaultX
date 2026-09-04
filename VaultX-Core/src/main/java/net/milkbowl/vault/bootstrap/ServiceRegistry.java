@@ -44,6 +44,12 @@ public class ServiceRegistry {
     private TownyLandsFactionsHook townyLandsFactionsHook;
     private BlackMarketManager blackMarketManager;
     private BankBackupManager bankBackupManager;
+    private net.milkbowl.vault.economy.service.LeaderboardEconomyService leaderboardService;
+    private net.milkbowl.vault.economy.service.AsyncEconomyService asyncEconomyService;
+    private net.milkbowl.vault.economy.service.BatchTransactionService batchTransactionService;
+    private net.milkbowl.vault.economy.service.InflationEconomyService inflationEconomyService;
+    private net.milkbowl.vault.economy.service.AnalyticsService analyticsService;
+    private net.milkbowl.vault.economy.service.AuditService auditService;
 
     private final List<OptimizedEconomy> wrappedEconomies = Collections.synchronizedList(new ArrayList<>());
 
@@ -177,6 +183,54 @@ public class ServiceRegistry {
 
     public void setBankBackupManager(BankBackupManager bankBackupManager) {
         this.bankBackupManager = bankBackupManager;
+    }
+
+    public net.milkbowl.vault.economy.service.LeaderboardEconomyService getLeaderboardService() {
+        return leaderboardService;
+    }
+
+    public void setLeaderboardService(net.milkbowl.vault.economy.service.LeaderboardEconomyService leaderboardService) {
+        this.leaderboardService = leaderboardService;
+    }
+
+    public net.milkbowl.vault.economy.service.AsyncEconomyService getAsyncEconomyService() {
+        return asyncEconomyService;
+    }
+
+    public void setAsyncEconomyService(net.milkbowl.vault.economy.service.AsyncEconomyService asyncEconomyService) {
+        this.asyncEconomyService = asyncEconomyService;
+    }
+
+    public net.milkbowl.vault.economy.service.BatchTransactionService getBatchTransactionService() {
+        return batchTransactionService;
+    }
+
+    public void setBatchTransactionService(net.milkbowl.vault.economy.service.BatchTransactionService batchTransactionService) {
+        this.batchTransactionService = batchTransactionService;
+    }
+
+    public net.milkbowl.vault.economy.service.InflationEconomyService getInflationEconomyService() {
+        return inflationEconomyService;
+    }
+
+    public void setInflationEconomyService(net.milkbowl.vault.economy.service.InflationEconomyService inflationEconomyService) {
+        this.inflationEconomyService = inflationEconomyService;
+    }
+
+    public net.milkbowl.vault.economy.service.AnalyticsService getAnalyticsService() {
+        return analyticsService;
+    }
+
+    public void setAnalyticsService(net.milkbowl.vault.economy.service.AnalyticsService analyticsService) {
+        this.analyticsService = analyticsService;
+    }
+
+    public net.milkbowl.vault.economy.service.AuditService getAuditService() {
+        return auditService;
+    }
+
+    public void setAuditService(net.milkbowl.vault.economy.service.AuditService auditService) {
+        this.auditService = auditService;
     }
 
     public List<OptimizedEconomy> getWrappedEconomies() {

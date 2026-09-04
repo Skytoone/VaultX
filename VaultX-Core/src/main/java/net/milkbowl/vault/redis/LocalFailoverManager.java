@@ -24,247 +24,95 @@ public class LocalFailoverManager {
 
     private static LocalFailoverManager instance;
 
-    // Nested DTO / Record definitions for 100% backward compatibility
+    // Nested DTO definitions delegating to net.milkbowl.vault.model for 100% backward compatibility
 
-    public static class CustomBalanceRecord {
-        public final UUID uuid;
-        public final String currency;
-        public final double balance;
-
+    public static class CustomBalanceRecord extends net.milkbowl.vault.model.CustomBalanceRecord {
         public CustomBalanceRecord(UUID uuid, String currency, double balance) {
-            this.uuid = uuid;
-            this.currency = currency;
-            this.balance = balance;
+            super(uuid, currency, balance);
         }
     }
 
-    public static class BankShareholderRecord {
-        public final UUID uuid;
-        public final String bankName;
-        public final double shares;
+    public static class BankShareholderRecord extends net.milkbowl.vault.model.BankShareholderRecord {
         public BankShareholderRecord(UUID uuid, String bankName, double shares) {
-            this.uuid = uuid;
-            this.bankName = bankName;
-            this.shares = shares;
+            super(uuid, bankName, shares);
         }
     }
 
-    public static class LoanRecord {
-        public final String id;
-        public final UUID borrower;
-        public final String bankName;
-        public final double principal;
-        public final double remaining;
-        public final double interestRate;
-        public final long nextBilling;
-        public final String status;
-
+    public static class LoanRecord extends net.milkbowl.vault.model.LoanRecord {
         public LoanRecord(String id, UUID borrower, String bankName, double principal, double remaining, double interestRate, long nextBilling, String status) {
-            this.id = id;
-            this.borrower = borrower;
-            this.bankName = bankName;
-            this.principal = principal;
-            this.remaining = remaining;
-            this.interestRate = interestRate;
-            this.nextBilling = nextBilling;
-            this.status = status;
+            super(id, borrower, bankName, principal, remaining, interestRate, nextBilling, status);
         }
     }
 
-    public static class MailRecord {
-        public final int id;
-        public final UUID uuid;
-        public final String senderName;
-        public final String message;
-        public final double amount;
-        public final String currency;
-        public final String status;
-        public final long timestamp;
-
+    public static class MailRecord extends net.milkbowl.vault.model.MailRecord {
         public MailRecord(int id, UUID uuid, String senderName, String message, double amount, String currency, String status, long timestamp) {
-            this.id = id;
-            this.uuid = uuid;
-            this.senderName = senderName;
-            this.message = message;
-            this.amount = amount;
-            this.currency = currency;
-            this.status = status;
-            this.timestamp = timestamp;
+            super(id, uuid, senderName, message, amount, currency, status, timestamp);
         }
     }
 
-    public static class SubscriptionRecord {
-        public final String id;
-        public final UUID subscriber;
-        public final String targetType;
-        public final String target;
-        public final double amount;
-        public final String currency;
-        public final int intervalHours;
-        public final long lastBilling;
-        public final long nextBilling;
-        public final String status;
-        public final long createdAt;
-
+    public static class SubscriptionRecord extends net.milkbowl.vault.model.SubscriptionRecord {
         public SubscriptionRecord(String id, UUID subscriber, String targetType, String target, double amount, String currency, int intervalHours, long lastBilling, long nextBilling, String status, long createdAt) {
-            this.id = id;
-            this.subscriber = subscriber;
-            this.targetType = targetType;
-            this.target = target;
-            this.amount = amount;
-            this.currency = currency;
-            this.intervalHours = intervalHours;
-            this.lastBilling = lastBilling;
-            this.nextBilling = nextBilling;
-            this.status = status;
-            this.createdAt = createdAt;
+            super(id, subscriber, targetType, target, amount, currency, intervalHours, lastBilling, nextBilling, status, createdAt);
         }
     }
 
-    public static class AuditRecord {
-        public final long timestamp;
-        public final String uuid;
-        public final String name;
-        public final double amount;
-        public final String action;
-        public final String details;
-
+    public static class AuditRecord extends net.milkbowl.vault.model.AuditRecord {
         public AuditRecord(long timestamp, String uuid, String name, double amount, String action, String details) {
-            this.timestamp = timestamp;
-            this.uuid = uuid;
-            this.name = name;
-            this.amount = amount;
-            this.action = action;
-            this.details = details;
+            super(timestamp, uuid, name, amount, action, details);
         }
     }
 
-    public static class PlayerTransactionRecord {
-        public final long timestamp;
-        public final String uuid;
-        public final String type;
-        public final String currency;
-        public final double amount;
-        public final String otherParty;
-        public final String category;
-
+    public static class PlayerTransactionRecord extends net.milkbowl.vault.model.PlayerTransactionRecord {
         public PlayerTransactionRecord(long timestamp, String uuid, String type, String currency, double amount, String otherParty, String category) {
-            this.timestamp = timestamp;
-            this.uuid = uuid;
-            this.type = type;
-            this.currency = currency;
-            this.amount = amount;
-            this.otherParty = otherParty;
-            this.category = category == null ? "OTHER" : category;
+            super(timestamp, uuid, type, currency, amount, otherParty, category);
         }
     }
 
-    public static class PendingSyncRecord {
-        public final String uuid;
-        public final String currency;
-        public final double balance;
-        public final long timestamp;
-
+    public static class PendingSyncRecord extends net.milkbowl.vault.model.PendingSyncRecord {
         public PendingSyncRecord(String uuid, String currency, double balance, long timestamp) {
-            this.uuid = uuid;
-            this.currency = currency;
-            this.balance = balance;
-            this.timestamp = timestamp;
+            super(uuid, currency, balance, timestamp);
         }
     }
 
-    public static class AnalyticsReportEntry {
-        public final String currency;
-        public final String category;
-        public final double created;
-        public final double destroyed;
-
+    public static class AnalyticsReportEntry extends net.milkbowl.vault.model.AnalyticsReportEntry {
         public AnalyticsReportEntry(String currency, String category, double created, double destroyed) {
-            this.currency = currency;
-            this.category = category;
-            this.created = created;
-            this.destroyed = destroyed;
+            super(currency, category, created, destroyed);
         }
     }
 
-    public static class PendingWebhookRecord {
-        public final long id;
-        public final String payload;
-        public final int attempts;
-        public final long nextRetry;
-
+    public static class PendingWebhookRecord extends net.milkbowl.vault.model.PendingWebhookRecord {
         public PendingWebhookRecord(long id, String payload, int attempts, long nextRetry) {
-            this.id = id;
-            this.payload = payload;
-            this.attempts = attempts;
-            this.nextRetry = nextRetry;
+            super(id, payload, attempts, nextRetry);
         }
     }
 
-    public static class LocalEscrowRecord {
-        public final String id;
-        public final String sender;
-        public final String receiver;
-        public final double amount;
-        public final String currency;
-        public final String status;
-        public final long timeoutAt;
-
+    public static class LocalEscrowRecord extends net.milkbowl.vault.model.LocalEscrowRecord {
         public LocalEscrowRecord(String id, String sender, String receiver, double amount, String currency, String status, long timeoutAt) {
-            this.id = id;
-            this.sender = sender;
-            this.receiver = receiver;
-            this.amount = amount;
-            this.currency = currency;
-            this.status = status;
-            this.timeoutAt = timeoutAt;
+            super(id, sender, receiver, amount, currency, status, timeoutAt);
         }
     }
 
-    public static class LocalCheckRecord {
-        public final String id;
-        public final double amount;
-        public final String currency;
-        public final UUID creatorUuid;
-        public final String status;
-        public final long createdAt;
+    public static class LocalCheckRecord extends net.milkbowl.vault.model.LocalCheckRecord {
         public LocalCheckRecord(String id, double amount, String currency, UUID creatorUuid, String status, long createdAt) {
-            this.id = id;
-            this.amount = amount;
-            this.currency = currency;
-            this.creatorUuid = creatorUuid;
-            this.status = status;
-            this.createdAt = createdAt;
+            super(id, amount, currency, creatorUuid, status, createdAt);
         }
         public LocalCheckRecord(String id, double amount, String currency, UUID creatorUuid, String status) {
-            this(id, amount, currency, creatorUuid, status, 0L);
+            super(id, amount, currency, creatorUuid, status);
         }
     }
 
-    public static class StockPortfolioEntry {
-        public final String commodity;
-        public final double shares;
+    public static class StockPortfolioEntry extends net.milkbowl.vault.model.StockPortfolioEntry {
         public StockPortfolioEntry(String commodity, double shares) {
-            this.commodity = commodity;
-            this.shares = shares;
+            super(commodity, shares);
         }
     }
 
-    public static class LocalCurrencyStats {
-        public final double totalMoney;
-        public final int accountsCount;
-        public final double averageBalance;
-        public final double transactionVolume24h;
-
+    public static class LocalCurrencyStats extends net.milkbowl.vault.model.LocalCurrencyStats {
         public LocalCurrencyStats(double totalMoney, int accountsCount, double averageBalance, double transactionVolume24h) {
-            this.totalMoney = totalMoney;
-            this.accountsCount = accountsCount;
-            this.averageBalance = averageBalance;
-            this.transactionVolume24h = transactionVolume24h;
+            super(totalMoney, accountsCount, averageBalance, transactionVolume24h);
         }
-
         public LocalCurrencyStats(double totalMoney, double averageBalance, double transactionVolume24h) {
-            this(totalMoney, 0, averageBalance, transactionVolume24h);
+            super(totalMoney, averageBalance, transactionVolume24h);
         }
     }
 

@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.function.BiFunction;
 
-public class StakingManager {
+public class StakingManager implements VaultStakingAPI {
 
     private final Plugin plugin;
     private final Map<String, VaultStakingAPI.StakeDeposit> activeStakes = new ConcurrentHashMap<>();
@@ -49,7 +49,6 @@ public class StakingManager {
             return future;
         }
         String curr = currency == null ? "default" : currency;
-        org.bukkit.entity.Player onlinePlayer = player.isOnline() ? player.getPlayer() : null;
 
         Runnable action = () -> {
             try {
@@ -62,7 +61,9 @@ public class StakingManager {
                 String stakeId = "stake_" + UUID.randomUUID().toString().substring(0, 8);
                 long now = System.currentTimeMillis();
                 long lockMs = durationDays * 86400000L;
-                double rate = 0.05 * (durationDays / 30.0 + 1.0);
+                double baseRate = plugin != null ? plugin.getConfig().getDouble("staking.base-rate", 0.05) : 0.05;
+                double periodFactor = plugin != null ? plugin.getConfig().getDouble("staking.period-factor", 30.0) : 30.0;
+                double rate = baseRate * (durationDays / periodFactor + 1.0);
 
                 VaultStakingAPI.StakeDeposit deposit = new VaultStakingAPI.StakeDeposit(
                         stakeId, player.getUniqueId(), curr, amount, rate, now, lockMs, false, false
@@ -82,9 +83,7 @@ public class StakingManager {
             }
         };
 
-        if (onlinePlayer != null && plugin != null) {
-            net.milkbowl.vault.util.FoliaScheduler.runEntitySync(plugin, onlinePlayer, action);
-        } else if (executor != null) {
+        if (executor != null) {
             executor.execute(action);
         } else {
             CompletableFuture.runAsync(action);
@@ -107,57 +106,59 @@ public class StakingManager {
             return future;
         }
 
-        VaultStakingAPI.StakeDeposit deposit = activeStakes.get(depositId);
-        if (deposit == null || !deposit.playerUuid().equals(player.getUniqueId())) {
-            claimingStakes.remove(depositId);
-            future.complete(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Stake deposit not found"));
-            return future;
-        }
-        if (deposit.isClaimed()) {
-            claimingStakes.remove(depositId);
-            future.complete(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Stake deposit already claimed"));
-            return future;
-        }
-        long now = System.currentTimeMillis();
-        if (now < deposit.stakedAtMs() + deposit.lockPeriodMs()) {
-            claimingStakes.remove(depositId);
-            future.complete(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Stake deposit is still locked"));
-            return future;
-        }
-
-        org.bukkit.entity.Player onlinePlayer = player.isOnline() ? player.getPlayer() : null;
-        Runnable action = () -> {
-            try {
-                double totalPayout = deposit.principal() * (1.0 + deposit.interestRate());
-                EconomyResponse res = depositFunc.apply(player, deposit.currency(), totalPayout);
-                if (res.transactionSuccess()) {
-                    VaultStakingAPI.StakeDeposit updated = new VaultStakingAPI.StakeDeposit(
-                            deposit.depositId(), deposit.playerUuid(), deposit.currency(), deposit.principal(),
-                            deposit.interestRate(), deposit.stakedAtMs(), deposit.lockPeriodMs(), true, true
-                    );
-                    activeStakes.put(depositId, updated);
-
-                    LocalFailoverManager failover = LocalFailoverManager.getInstance();
-                    if (failover != null && plugin != null) {
-                        net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> failover.saveStake(updated));
-                    } else if (failover != null) {
-                        failover.saveStake(updated);
-                    }
-                }
-                future.complete(res);
-            } catch (Exception e) {
-                future.complete(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, e.getMessage()));
-            } finally {
+        try {
+            VaultStakingAPI.StakeDeposit deposit = activeStakes.get(depositId);
+            if (deposit == null || !deposit.playerUuid().equals(player.getUniqueId())) {
                 claimingStakes.remove(depositId);
+                future.complete(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Stake deposit not found"));
+                return future;
             }
-        };
+            if (deposit.isClaimed()) {
+                claimingStakes.remove(depositId);
+                future.complete(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Stake deposit already claimed"));
+                return future;
+            }
+            long now = System.currentTimeMillis();
+            if (now < deposit.stakedAtMs() + deposit.lockPeriodMs()) {
+                claimingStakes.remove(depositId);
+                future.complete(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Stake deposit is still locked"));
+                return future;
+            }
 
-        if (onlinePlayer != null && plugin != null) {
-            net.milkbowl.vault.util.FoliaScheduler.runEntitySync(plugin, onlinePlayer, action);
-        } else if (executor != null) {
-            executor.execute(action);
-        } else {
-            CompletableFuture.runAsync(action);
+            Runnable action = () -> {
+                try {
+                    double totalPayout = deposit.principal() * (1.0 + deposit.interestRate());
+                    EconomyResponse res = depositFunc.apply(player, deposit.currency(), totalPayout);
+                    if (res.transactionSuccess()) {
+                        VaultStakingAPI.StakeDeposit updated = new VaultStakingAPI.StakeDeposit(
+                                deposit.depositId(), deposit.playerUuid(), deposit.currency(), deposit.principal(),
+                                deposit.interestRate(), deposit.stakedAtMs(), deposit.lockPeriodMs(), true, true
+                        );
+                        activeStakes.put(depositId, updated);
+
+                        LocalFailoverManager failover = LocalFailoverManager.getInstance();
+                        if (failover != null && plugin != null) {
+                            net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, () -> failover.saveStake(updated));
+                        } else if (failover != null) {
+                            failover.saveStake(updated);
+                        }
+                    }
+                    future.complete(res);
+                } catch (Exception e) {
+                    future.complete(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, e.getMessage()));
+                } finally {
+                    claimingStakes.remove(depositId);
+                }
+            };
+
+            if (executor != null) {
+                executor.execute(action);
+            } else {
+                CompletableFuture.runAsync(action);
+            }
+        } catch (Exception e) {
+            claimingStakes.remove(depositId);
+            future.complete(new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, e.getMessage()));
         }
         return future;
     }
@@ -180,5 +181,34 @@ public class StakingManager {
             }
         }
         activeStakes.clear();
+    }
+
+    private MultiCurrencyEconomy getPrimaryEconomy() {
+        var registry = net.milkbowl.vault.Vault.getServiceRegistry();
+        return (registry != null && !registry.getWrappedEconomies().isEmpty()) ? registry.getWrappedEconomies().get(0) : null;
+    }
+
+    @Override
+    public CompletableFuture<EconomyResponse> createStakeAsync(OfflinePlayer player, String currency, double amount, int durationDays) {
+        return createStakeAsync(player, currency, amount, durationDays, (p, c) -> {
+            var econ = getPrimaryEconomy();
+            return econ != null ? econ.getCurrencyBalance(p, c) : 0.0;
+        }, (p, c, amt) -> {
+            var econ = getPrimaryEconomy();
+            return econ != null ? econ.withdrawCurrencyPlayer(p, c, amt) : new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "No economy provider");
+        }, null);
+    }
+
+    @Override
+    public CompletableFuture<EconomyResponse> claimStakeAsync(OfflinePlayer player, String depositId) {
+        return claimStakeAsync(player, depositId, (p, c, amt) -> {
+            var econ = getPrimaryEconomy();
+            return econ != null ? econ.depositCurrencyPlayer(p, c, amt) : new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "No economy provider");
+        }, null);
+    }
+
+    @Override
+    public CompletableFuture<List<VaultStakingAPI.StakeDeposit>> getActiveStakesAsync(OfflinePlayer player) {
+        return getActiveStakesAsync(player, null);
     }
 }

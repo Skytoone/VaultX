@@ -61,6 +61,47 @@ public class PluginBootstrap {
         }
     }
 
+    public void initializeStorageProvider() {
+        String syncProvider = plugin.getConfig().getString("storage.sync-provider", "redis").toLowerCase();
+        if ("postgresql".equals(syncProvider) || "postgres".equals(syncProvider)) {
+            String host = plugin.getConfig().getString("storage.postgresql.host", "127.0.0.1");
+            int port = plugin.getConfig().getInt("storage.postgresql.port", 5432);
+            String db = plugin.getConfig().getString("storage.postgresql.database", "vaultx");
+            String username = plugin.getConfig().getString("storage.postgresql.username", "postgres");
+            String password = plugin.getConfig().getString("storage.postgresql.password", "");
+            String serverId = plugin.getConfig().getString("redis.server-id", "server-1");
+            String channel = plugin.getConfig().getString("storage.postgresql.channel", "vaultx_sync");
+            String properties = plugin.getConfig().getString("storage.postgresql.properties", "");
+
+            new net.milkbowl.vault.redis.VaultPostgresManager(plugin, host, port, db, username, password, serverId, channel, properties);
+        } else if (plugin.getConfig().getBoolean("redis.enabled", false)) {
+            String host = plugin.getConfig().getString("redis.host", "127.0.0.1");
+            int port = plugin.getConfig().getInt("redis.port", 6379);
+            String password = plugin.getConfig().getString("redis.password", "");
+            String serverId = plugin.getConfig().getString("redis.server-id", "server-1");
+            String channel = plugin.getConfig().getString("redis.channel", "vaultx:economy:sync");
+
+            new net.milkbowl.vault.redis.VaultRedisManager(plugin, host, port, password, serverId, channel);
+        }
+    }
+
+    public void initializeIntegrations() {
+        if (org.bukkit.Bukkit.getPluginManager().isPluginEnabled("PlaceholderAPI")) {
+            net.milkbowl.vault.util.VaultPlaceholderExpansion expansion = new net.milkbowl.vault.util.VaultPlaceholderExpansion(plugin);
+            expansion.register();
+            plugin.getServer().getPluginManager().registerEvents(expansion, plugin);
+        }
+
+        if (org.bukkit.Bukkit.getPluginManager().isPluginEnabled("Skript")) {
+            try {
+                net.milkbowl.vault.skript.SkriptVaultXHook.register();
+                plugin.getLogger().info("Successfully registered custom Skript currency addon.");
+            } catch (Throwable e) {
+                plugin.getLogger().warning("Failed to register custom Skript currency addon: " + e.getMessage());
+            }
+        }
+    }
+
     public void registerServices(ServiceRegistry registry) {
         ServicesManager sm = plugin.getServer().getServicesManager();
         if (sm == null) return;
@@ -72,28 +113,56 @@ public class PluginBootstrap {
         var wrappedEconomies = registry.getWrappedEconomies();
         if (wrappedEconomies != null && !wrappedEconomies.isEmpty()) {
             OptimizedEconomy primaryEcon = wrappedEconomies.get(0);
-            sm.register(net.milkbowl.vault.economy.VaultLeaderboardAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultBatchTransactionAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultFormatAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultMailboxAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultBoosterAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultLockAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultSubscriptionAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultAnalyticsAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultCurrencyRegistry.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultAuditAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultCheckAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultLoanAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultInflationAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultMilestoneAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultCryptoAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultSnapshotAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultAsyncEconomy.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultMultiSigAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultAMMExchangeAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultSmartContractAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultStandingOrderAPI.class, primaryEcon, plugin, ServicePriority.Normal);
-            sm.register(net.milkbowl.vault.economy.VaultCashbackLoyaltyAPI.class, primaryEcon, plugin, ServicePriority.Normal);
+
+            var leaderboardService = new net.milkbowl.vault.economy.service.LeaderboardEconomyService(primaryEcon.getAsyncExecutor());
+            registry.setLeaderboardService(leaderboardService);
+            sm.register(net.milkbowl.vault.economy.VaultLeaderboardAPI.class, leaderboardService, plugin, ServicePriority.Normal);
+
+            var batchService = new net.milkbowl.vault.economy.service.BatchTransactionService(primaryEcon, primaryEcon.getAsyncExecutor());
+            registry.setBatchTransactionService(batchService);
+            sm.register(net.milkbowl.vault.economy.VaultBatchTransactionAPI.class, batchService, plugin, ServicePriority.Normal);
+
+            var asyncService = new net.milkbowl.vault.economy.service.AsyncEconomyService(primaryEcon, primaryEcon.getAsyncExecutor());
+            registry.setAsyncEconomyService(asyncService);
+            sm.register(net.milkbowl.vault.economy.VaultAsyncEconomy.class, asyncService, plugin, ServicePriority.Normal);
+
+            var inflationService = new net.milkbowl.vault.economy.service.InflationEconomyService(primaryEcon.getWealthTaxManager());
+            registry.setInflationEconomyService(inflationService);
+            sm.register(net.milkbowl.vault.economy.VaultInflationAPI.class, inflationService, plugin, ServicePriority.Normal);
+
+            var analyticsService = new net.milkbowl.vault.economy.service.AnalyticsService(primaryEcon.getAsyncExecutor());
+            registry.setAnalyticsService(analyticsService);
+            sm.register(net.milkbowl.vault.economy.VaultAnalyticsAPI.class, analyticsService, plugin, ServicePriority.Normal);
+
+            var auditService = new net.milkbowl.vault.economy.service.AuditService(primaryEcon.getAsyncExecutor());
+            registry.setAuditService(auditService);
+            sm.register(net.milkbowl.vault.economy.VaultAuditAPI.class, auditService, plugin, ServicePriority.Normal);
+
+            sm.register(net.milkbowl.vault.economy.VaultFormatAPI.class, primaryEcon.getCurrencyService(), plugin, ServicePriority.Normal);
+
+            sm.register(net.milkbowl.vault.economy.VaultMailboxAPI.class, primaryEcon.getMailboxService(), plugin, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultBoosterAPI.class, primaryEcon.getBoosterService(), plugin, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultLockAPI.class, primaryEcon.getEconomyLockService(), plugin, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultSubscriptionAPI.class, primaryEcon.getSubscriptionService(), plugin, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultCurrencyRegistry.class, primaryEcon.getCurrencyService(), plugin, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultCheckAPI.class, primaryEcon.getBankCheckService(), plugin, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultLoanAPI.class, primaryEcon.getLoanEconomyService(), plugin, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultMilestoneAPI.class, primaryEcon.getMilestoneService(), plugin, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultCryptoAPI.class, primaryEcon.getCryptoManager(), plugin, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultAuctionAPI.class, primaryEcon.getAuctionManager(), plugin, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultStakingAPI.class, primaryEcon.getStakingManager(), plugin, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultTaxAPI.class, primaryEcon.getWealthTaxManager(), plugin, ServicePriority.Normal);
+            sm.register(net.milkbowl.vault.economy.VaultCreditAPI.class, primaryEcon.getCreditManager(), plugin, ServicePriority.Normal);
+
+            var adv = primaryEcon.getAdvancedBankingService();
+            if (adv != null) {
+                sm.register(net.milkbowl.vault.economy.VaultSnapshotAPI.class, adv, plugin, ServicePriority.Normal);
+                sm.register(net.milkbowl.vault.economy.VaultMultiSigAPI.class, adv, plugin, ServicePriority.Normal);
+                sm.register(net.milkbowl.vault.economy.VaultAMMExchangeAPI.class, adv, plugin, ServicePriority.Normal);
+                sm.register(net.milkbowl.vault.economy.VaultSmartContractAPI.class, adv, plugin, ServicePriority.Normal);
+                sm.register(net.milkbowl.vault.economy.VaultStandingOrderAPI.class, adv, plugin, ServicePriority.Normal);
+                sm.register(net.milkbowl.vault.economy.VaultCashbackLoyaltyAPI.class, adv, plugin, ServicePriority.Normal);
+            }
         }
     }
 

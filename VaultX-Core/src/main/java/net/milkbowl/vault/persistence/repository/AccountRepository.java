@@ -168,10 +168,21 @@ public class AccountRepository {
     public double getTotalMoneySupply(String currency) {
         String query = "SELECT SUM(balance) FROM custom_currency_balances WHERE currency = ?";
         return dbManager.executeDatabaseQuery(conn -> {
-            try (PreparedStatement pstmt = conn.prepareStatement(query)) {
-                pstmt.setString(1, currency != null ? currency.toLowerCase() : "default");
-                try (ResultSet rs = pstmt.executeQuery()) {
-                    if (rs.next()) return rs.getDouble(1);
+            String targetCurrency = currency != null ? currency.toLowerCase() : "default";
+            try {
+                try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                    pstmt.setString(1, targetCurrency);
+                    try (ResultSet rs = pstmt.executeQuery()) {
+                        if (rs.next()) return rs.getDouble(1);
+                    }
+                }
+            } catch (SQLException e) {
+                String fallbackQuery = "SELECT SUM(balance) FROM user_balances WHERE currency = ?";
+                try (PreparedStatement pstmt = conn.prepareStatement(fallbackQuery)) {
+                    pstmt.setString(1, targetCurrency);
+                    try (ResultSet rs = pstmt.executeQuery()) {
+                        if (rs.next()) return rs.getDouble(1);
+                    }
                 }
             }
             return 0.0;
@@ -181,10 +192,21 @@ public class AccountRepository {
     public double getAverageAccountBalance(String currency) {
         String query = "SELECT AVG(balance) FROM custom_currency_balances WHERE currency = ?";
         return dbManager.executeDatabaseQuery(conn -> {
-            try (PreparedStatement pstmt = conn.prepareStatement(query)) {
-                pstmt.setString(1, currency != null ? currency.toLowerCase() : "default");
-                try (ResultSet rs = pstmt.executeQuery()) {
-                    if (rs.next()) return rs.getDouble(1);
+            String targetCurrency = currency != null ? currency.toLowerCase() : "default";
+            try {
+                try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                    pstmt.setString(1, targetCurrency);
+                    try (ResultSet rs = pstmt.executeQuery()) {
+                        if (rs.next()) return rs.getDouble(1);
+                    }
+                }
+            } catch (SQLException e) {
+                String fallbackQuery = "SELECT AVG(balance) FROM user_balances WHERE currency = ?";
+                try (PreparedStatement pstmt = conn.prepareStatement(fallbackQuery)) {
+                    pstmt.setString(1, targetCurrency);
+                    try (ResultSet rs = pstmt.executeQuery()) {
+                        if (rs.next()) return rs.getDouble(1);
+                    }
                 }
             }
             return 0.0;

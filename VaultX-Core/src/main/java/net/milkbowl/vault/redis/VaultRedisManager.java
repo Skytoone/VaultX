@@ -1,17 +1,13 @@
 package net.milkbowl.vault.redis;
 
-import net.milkbowl.vault.economy.OptimizedEconomy;
-import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.JedisPoolConfig;
-import redis.clients.jedis.JedisPubSub;
 
 import java.util.UUID;
 import java.util.List;
 import java.util.ArrayList;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import net.milkbowl.vault.redis.service.RedisLeaderboardService;
+import net.milkbowl.vault.redis.service.RedisSyncQueueService;
 
 public class VaultRedisManager {
 
@@ -33,64 +29,29 @@ public class VaultRedisManager {
     private final LocalFailoverManager failoverManager;
     private final java.util.concurrent.ScheduledExecutorService redisExecutor;
 
-    private final Map<String, List<LeaderboardEntry>> leaderboardCaches = new ConcurrentHashMap<>();
-    private org.bukkit.scheduler.BukkitTask leaderboardTask;
+    private final RedisLeaderboardService leaderboardService;
+    private final RedisSyncQueueService syncQueueService;
+    private final net.milkbowl.vault.redis.service.RedisMessageSyncHandler syncHandler;
 
-    private final Map<String, java.util.concurrent.ScheduledFuture<?>> pendingPublishes = new ConcurrentHashMap<>();
-    private final Map<String, Double> pendingBalances = new ConcurrentHashMap<>();
-
-    private static final String UPDATE_BALANCE_STATS_LUA = "local oldScore = redis.call('zscore', KEYS[1], ARGV[1])\n" +
-            "redis.call('zadd', KEYS[1], ARGV[2], ARGV[1])\n" +
-            "local diff = tonumber(ARGV[2])\n" +
-            "if oldScore then\n" +
-            "    diff = tonumber(ARGV[2]) - tonumber(oldScore)\n" +
-            "else\n" +
-            "    redis.call('incr', KEYS[3])\n" +
-            "end\n" +
-            "redis.call('incrbyfloat', KEYS[2], diff)\n" +
-            "return 1";
-
-    private String updateScriptSha1 = null;
+    private final net.milkbowl.vault.redis.service.RedisScriptService scriptService = new net.milkbowl.vault.redis.service.RedisScriptService();
 
     private void updateLeaderboardAndStats(redis.clients.jedis.Jedis jedis, String curr, String member, double score) {
-        String leaderboardKey = "vaultx:leaderboard:" + curr;
-        String totalMoneyKey = "vaultx:stats:total_money:" + curr;
-        String accountsCountKey = "vaultx:stats:accounts_count:" + curr;
-
-        List<String> keys = java.util.Arrays.asList(leaderboardKey, totalMoneyKey, accountsCountKey);
-        List<String> args = java.util.Arrays.asList(member, String.valueOf(score));
-
-        try {
-            if (updateScriptSha1 == null) {
-                updateScriptSha1 = jedis.scriptLoad(UPDATE_BALANCE_STATS_LUA);
-            }
-            jedis.evalsha(updateScriptSha1, keys, args);
-        } catch (Exception e) {
-            try {
-                updateScriptSha1 = jedis.scriptLoad(UPDATE_BALANCE_STATS_LUA);
-            } catch (Exception ignored) {}
-            jedis.eval(UPDATE_BALANCE_STATS_LUA, keys, args);
-        }
+        scriptService.updateLeaderboardAndStats(jedis, curr, member, score);
     }
 
-    private JedisPubSub pubSub;
-    private boolean wasOnline = true;
-    private volatile boolean online = false;
-    private int reconnectAttempts = 0;
-    private static final int MAX_COOLDOWN_MS = 60000;
-    private final java.util.Random random = new java.util.Random();
 
     private final RedisPayloadEncryptor encryptor;
     private final RedisConnectionFactory connectionFactory;
     private final DistributedLockProvider lockProvider;
     private final RedisPubSubService pubSubService;
+    private final RedisConnectionManager connectionManager;
 
     public VaultRedisManager(Plugin plugin, String host, int port, String password, String serverId, String channel) {
         this.plugin = plugin;
         this.serverId = serverId;
         this.syncChannel = channel;
         this.failoverManager = net.milkbowl.vault.Vault.getFailoverManager();
-        this.redisExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
+        this.syncHandler = new net.milkbowl.vault.redis.service.RedisMessageSyncHandler(plugin, serverId, failoverManager);
 
         this.connectionFactory = new RedisConnectionFactory(plugin, host, port, password);
         this.pool = connectionFactory.getPool();
@@ -100,13 +61,26 @@ public class VaultRedisManager {
         this.encryptor = pubSubService.getEncryptor();
         this.lockProvider = new DistributedLockProvider(this.pool);
 
+        this.connectionManager = new RedisConnectionManager(plugin, pool, channel, encryptor);
+        this.redisExecutor = connectionManager.getExecutor();
+
+        this.leaderboardService = new RedisLeaderboardService(plugin, pool, redisExecutor);
+        this.syncQueueService = new RedisSyncQueueService(pool, serverId, channel, encryptor, failoverManager, redisExecutor, leaderboardService);
+
         instance = this;
-        this.online = checkConnection();
-        startSubscriber();
-        startHeartbeat();
+        this.connectionManager.setCallbacks(
+            () -> {
+                failoverManager.processQueue(VaultRedisManager.this);
+                syncLocalBanksToRedis();
+                syncFrozenPlayers();
+            },
+            null,
+            this::handleSyncMessage
+        );
+        this.connectionManager.start();
         startLeaderboardUpdater();
 
-        if (this.online) {
+        if (this.isOnline()) {
             syncFrozenPlayers();
         }
 
@@ -141,173 +115,25 @@ public class VaultRedisManager {
         return pool;
     }
 
-    private volatile boolean closing = false;
-    private org.bukkit.scheduler.BukkitTask subscriberTask;
-
     public void close() {
-        closing = true;
         stopLeaderboardUpdater();
-        if (subscriberTask != null) {
-            try {
-                subscriberTask.cancel();
-            } catch (Exception ignored) {}
+        if (syncQueueService != null) {
+            syncQueueService.flushAndClear(isOnline());
         }
-        if (pubSub != null) {
-            try {
-                pubSub.unsubscribe();
-            } catch (Exception e) {
-                // Ignore
-            }
+        if (connectionManager != null) {
+            connectionManager.close();
         }
-
-        // Cancel all pending future tasks
-        for (java.util.concurrent.ScheduledFuture<?> future : pendingPublishes.values()) {
-            if (future != null) {
-                try {
-                    future.cancel(false);
-                } catch (Exception ignored) {}
-            }
-        }
-
-        // Flush all pending balances synchronously before shutting down
-        if (isOnline() && !pendingBalances.isEmpty()) {
-            try (redis.clients.jedis.Jedis jedis = pool.getResource()) {
-                for (Map.Entry<String, Double> entry : pendingBalances.entrySet()) {
-                    String[] parts = entry.getKey().split(":");
-                    if (parts.length == 2) {
-                        try {
-                            UUID playerUuid = UUID.fromString(parts[0]);
-                            String curr = parts[1];
-                            double balance = entry.getValue();
-                            long timestamp = System.currentTimeMillis();
-                            jedis.hset("vaultx:balances:" + playerUuid.toString(), curr, String.valueOf(balance));
-                            jedis.hset("vaultx:timestamps:" + playerUuid.toString(), curr, String.valueOf(timestamp));
-                            updateLeaderboardAndStats(jedis, curr, playerUuid.toString(), balance);
-                            String payload = serverId + ":" + playerUuid.toString() + ":" + curr + ":" + balance + ":"
-                                    + timestamp;
-                            publishPayload(jedis, payload);
-                        } catch (Exception ignored) {}
-                    }
-                }
-            } catch (Exception e) {
-                for (Map.Entry<String, Double> entry : pendingBalances.entrySet()) {
-                    String[] parts = entry.getKey().split(":");
-                    if (parts.length == 2) {
-                        try {
-                            failoverManager.queueBalanceSync(UUID.fromString(parts[0]), parts[1], entry.getValue());
-                        } catch (Exception ignored) {}
-                    }
-                }
-            }
-        }
-        pendingBalances.clear();
-        pendingPublishes.clear();
-
-        // Shut down the executor
-        redisExecutor.shutdown();
-        try {
-            if (!redisExecutor.awaitTermination(3, java.util.concurrent.TimeUnit.SECONDS)) {
-                redisExecutor.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            redisExecutor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
-
         if (pool != null) {
             try {
                 pool.close();
-            } catch (Exception e) {
-                // Ignore
-            }
+            } catch (Exception ignored) {}
         }
         instance = null;
     }
 
     private void publishPayload(redis.clients.jedis.Jedis jedis, String payload) {
-        jedis.publish(syncChannel, encryptor.encrypt(payload));
-    }
-
-    private void startSubscriber() {
-        subscriberTask = net.milkbowl.vault.util.FoliaScheduler.runAsync(plugin, new Runnable() {
-            @Override
-            public void run() {
-                while (!closing && pool != null && !pool.isClosed()) {
-                    if (isOnline()) {
-                        try (redis.clients.jedis.Jedis jedis = pool.getResource()) {
-                            pubSub = new JedisPubSub() {
-                                @Override
-                                public void onMessage(String channel, String message) {
-                                    if (channel.equals(syncChannel)) {
-                                        handleSyncMessage(encryptor.decrypt(message));
-                                    }
-                                }
-                            };
-                            jedis.subscribe(pubSub, syncChannel);
-                        } catch (Exception e) {
-                            // Suppress excessive logs during reconnect attempts
-                        }
-                    }
-                    if (closing || pool == null || pool.isClosed()) break;
-                    try {
-                        Thread.sleep(5000);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
-            }
-        });
-    }
-
-    private void startHeartbeat() {
-        long heartbeatInterval = plugin.getConfig().getLong("redis.heartbeat-interval-seconds", 5L) * 20L;
-        net.milkbowl.vault.util.FoliaScheduler.runLaterAsync(plugin, this::runHeartbeatCheck, heartbeatInterval);
-    }
-
-    private void runHeartbeatCheck() {
-        if (closing) return;
-        long baseCooldownMs = plugin.getConfig().getLong("redis.heartbeat-interval-seconds", 5L) * 1000L;
-        if (baseCooldownMs < 1000L)
-            baseCooldownMs = 1000L; // Safety floor
-
-        boolean currentOnline = checkConnection();
-        long nextDelayMs;
-
-        if (currentOnline) {
-            reconnectAttempts = 0;
-            nextDelayMs = baseCooldownMs;
-
-            if (!wasOnline) {
-                plugin.getLogger()
-                        .info("[VaultRedis] Redis connection re-established! Syncing offline modifications.");
-                failoverManager.processQueue(VaultRedisManager.this);
-                syncLocalBanksToRedis();
-                syncFrozenPlayers();
-            }
-        } else {
-            if (wasOnline) {
-                plugin.getLogger().warning(
-                        "[VaultRedis] Redis connection lost! VaultX switched to Local Failover (SQLite) mode.");
-            }
-            reconnectAttempts++;
-            // Exponential backoff: base * 1.5^attempts, max out around 8 attempts
-            double backoff = baseCooldownMs * Math.pow(1.5, Math.min(reconnectAttempts, 8));
-            // Add Jitter (+/- 20% of current backoff)
-            double jitterRange = backoff * 0.2;
-            double jitter = (random.nextDouble() * 2 * jitterRange) - jitterRange;
-
-            nextDelayMs = (long) Math.min(MAX_COOLDOWN_MS, Math.max(baseCooldownMs, backoff + jitter));
-        }
-
-        wasOnline = currentOnline;
-        online = currentOnline;
-
-        // Convert ms to ticks (20 ticks per second)
-        long ticks = Math.max(20L, (nextDelayMs * 20L) / 1000L);
-
-        if (!closing && pool != null && !pool.isClosed()) {
-            net.milkbowl.vault.util.FoliaScheduler.runLaterAsync(plugin, this::runHeartbeatCheck, ticks);
+        if (connectionManager != null) {
+            connectionManager.publishPayload(payload);
         }
     }
 
@@ -323,155 +149,13 @@ public class VaultRedisManager {
     }
 
     private void handleSyncMessage(String message) {
-        // Format: serverId:uuid:currency:balance OR serverId:BANK:bankName:balance
-        String[] parts = message.split(":");
-        if (parts.length >= 4) {
-            String originServer = parts[0];
-            if (originServer.equals(this.serverId))
-                return; // Ignore own messages
-
-            if (parts[1].equals("BANK_MEMBER_UPDATE")) {
-                try {
-                    String bankName = parts[2];
-                    UUID uuid = UUID.fromString(parts[3]);
-                    String role = parts[4];
-                    if (role.equals("REMOVE")) {
-                        failoverManager.removeBankMember(bankName, uuid);
-                    } else {
-                        failoverManager.addBankMember(bankName, uuid, role);
-                    }
-                } catch (Exception e) {
-                    plugin.getLogger().fine("[VaultRedis] Error processing BANK_MEMBER_UPDATE sync: " + e.getMessage());
-                }
-                return;
-            }
-
-            if (parts[1].equals("BANK")) {
-                try {
-                    String bankName = parts[2];
-                    double balance = Double.parseDouble(parts[3]);
-                    org.bukkit.plugin.RegisteredServiceProvider<net.milkbowl.vault.economy.Economy> rsp = Bukkit
-                            .getServicesManager().getRegistration(net.milkbowl.vault.economy.Economy.class);
-                    if (rsp != null && rsp.getProvider() instanceof OptimizedEconomy) {
-                        ((OptimizedEconomy) rsp.getProvider()).updateBankCacheFromRedis(bankName, balance);
-                    }
-                } catch (Exception e) {
-                    plugin.getLogger().fine("[VaultRedis] Error processing BANK sync: " + e.getMessage());
-                }
-                return;
-            }
-
-            if (parts[1].equals("FREEZE")) {
-                try {
-                    final UUID uuid = UUID.fromString(parts[2]);
-                    final String reason = parts.length > 3 ? parts[3] : "Synchronized from Redis";
-                    net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, new Runnable() {
-                        @Override
-                        public void run() {
-                            if (net.milkbowl.vault.Vault.getFirewall() != null) {
-                                net.milkbowl.vault.Vault.getFirewall().freezePlayerLocal(uuid, reason);
-                            }
-                        }
-                    });
-                } catch (Exception e) {
-                    plugin.getLogger().fine("[VaultRedis] Error processing FREEZE sync: " + e.getMessage());
-                }
-                return;
-            }
-
-            if (parts[1].equals("UNFREEZE")) {
-                try {
-                    final UUID uuid = UUID.fromString(parts[2]);
-                    net.milkbowl.vault.util.FoliaScheduler.runSync(plugin, new Runnable() {
-                        @Override
-                        public void run() {
-                            if (net.milkbowl.vault.Vault.getFirewall() != null) {
-                                net.milkbowl.vault.Vault.getFirewall().unfreezePlayerLocal(uuid);
-                            }
-                        }
-                    });
-                } catch (Exception e) {
-                    plugin.getLogger().fine("[VaultRedis] Error processing UNFREEZE sync: " + e.getMessage());
-                }
-                return;
-            }
-
-            try {
-                UUID uuid = UUID.fromString(parts[1]);
-                String currency = parts[2];
-                double balance = Double.parseDouble(parts[3]);
-                long timestamp = parts.length > 4 ? Long.parseLong(parts[4]) : System.currentTimeMillis();
-
-                long localTimestamp = failoverManager.getCustomCurrencyTimestamp(uuid, currency);
-                if (timestamp >= localTimestamp) {
-                    if (currency.equalsIgnoreCase("default")) {
-                        failoverManager.saveCustomCurrencyBalance(uuid, "default", balance, timestamp);
-                        org.bukkit.plugin.RegisteredServiceProvider<net.milkbowl.vault.economy.Economy> rsp = Bukkit
-                                .getServicesManager().getRegistration(net.milkbowl.vault.economy.Economy.class);
-                        if (rsp != null && rsp.getProvider() instanceof OptimizedEconomy) {
-                            ((OptimizedEconomy) rsp.getProvider()).updateCacheFromRedis(uuid, currency, balance);
-                        }
-                        failoverManager.updateDelegateBalance(uuid, balance);
-                    } else {
-                        failoverManager.saveCustomCurrencyBalance(uuid, currency, balance, timestamp);
-                        org.bukkit.plugin.RegisteredServiceProvider<net.milkbowl.vault.economy.Economy> rsp = Bukkit
-                                .getServicesManager().getRegistration(net.milkbowl.vault.economy.Economy.class);
-                        if (rsp != null && rsp.getProvider() instanceof OptimizedEconomy) {
-                            ((OptimizedEconomy) rsp.getProvider()).updateCacheFromRedis(uuid, currency, balance);
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                // Invalid format
-            }
+        if (syncHandler != null) {
+            syncHandler.handleSyncMessage(message);
         }
     }
 
     public void publishBalanceUpdate(final UUID playerUuid, final String currency, final double newBalance) {
-        final String curr = (currency == null ? "default" : currency).toLowerCase();
-        final String key = playerUuid.toString() + ":" + curr;
-
-        pendingBalances.put(key, newBalance);
-
-        // Cancel existing pending task if any
-        java.util.concurrent.ScheduledFuture<?> existing = pendingPublishes.remove(key);
-        if (existing != null) {
-            existing.cancel(false);
-        }
-
-        // Schedule new task with 200ms delay
-        java.util.concurrent.ScheduledFuture<?> task = redisExecutor.schedule(new Runnable() {
-            @Override
-            public void run() {
-                pendingPublishes.remove(key);
-                Double balanceObj = pendingBalances.remove(key);
-                if (balanceObj == null)
-                    return;
-
-                final double balance = balanceObj;
-                final long timestamp = System.currentTimeMillis();
-
-                if (!isOnline()) {
-                    failoverManager.queueBalanceSync(playerUuid, curr, balance);
-                    return;
-                }
-                try (redis.clients.jedis.Jedis jedis = pool.getResource()) {
-                    jedis.hset("vaultx:balances:" + playerUuid.toString(), curr, String.valueOf(balance));
-                    jedis.hset("vaultx:timestamps:" + playerUuid.toString(), curr, String.valueOf(timestamp));
-                    updateLeaderboardAndStats(jedis, curr, playerUuid.toString(), balance);
-                    String payload = serverId + ":" + playerUuid.toString() + ":" + curr + ":" + balance + ":"
-                            + timestamp;
-                    publishPayload(jedis, payload);
-                } catch (Exception e) {
-                    plugin.getLogger()
-                            .warning("[VaultRedis] Failed to publish balance update to Redis. Queueing locally: "
-                                    + e.getMessage());
-                    failoverManager.queueBalanceSync(playerUuid, curr, balance);
-                }
-            }
-        }, 200, java.util.concurrent.TimeUnit.MILLISECONDS);
-
-        pendingPublishes.put(key, task);
+        syncQueueService.queueBalancePublish(playerUuid, currency, newBalance, isOnline());
     }
 
     public void publishBankMemberUpdate(final String bankName, final UUID uuid, final String role) {
@@ -527,17 +211,11 @@ public class VaultRedisManager {
     }
 
     public boolean isOnline() {
-        return online && pool != null && !pool.isClosed();
+        return connectionManager != null && connectionManager.isOnline();
     }
 
     public boolean checkConnection() {
-        if (pool == null || pool.isClosed())
-            return false;
-        try (redis.clients.jedis.Jedis jedis = pool.getResource()) {
-            return "PONG".equalsIgnoreCase(jedis.ping());
-        } catch (Exception e) {
-            return false;
-        }
+        return connectionManager != null && connectionManager.checkConnection();
     }
 
     public boolean acquireLock(String lockKey, String value, int expireTimeMs) {
@@ -682,66 +360,27 @@ public class VaultRedisManager {
     }
 
     private void startLeaderboardUpdater() {
-        int intervalTicks = plugin.getConfig().getInt("advanced.global-rich-list.update-interval-minutes", 5) * 1200;
-        leaderboardTask = net.milkbowl.vault.util.FoliaScheduler.runTimerAsync(plugin, new Runnable() {
-            @Override
-            public void run() {
-                updateAllLeaderboards();
-            }
-        }, 100L, intervalTicks);
+        if (leaderboardService != null) {
+            leaderboardService.startLeaderboardUpdater(isOnline());
+        }
     }
 
     public void stopLeaderboardUpdater() {
-        if (leaderboardTask != null) {
-            leaderboardTask.cancel();
-            leaderboardTask = null;
-        }
-    }
-
-    private void updateAllLeaderboards() {
-        if (!isOnline())
-            return;
-
-        List<String> currencies = new ArrayList<>();
-        currencies.add("default");
-        org.bukkit.configuration.ConfigurationSection section = plugin.getConfig()
-                .getConfigurationSection("currency-exchange.rates");
-        if (section != null) {
-            for (String key : section.getKeys(false)) {
-                currencies.add(key.toLowerCase());
-            }
-        }
-
-        int maxPlayers = plugin.getConfig().getInt("advanced.global-rich-list.max-tracked-players", 100);
-
-        try (redis.clients.jedis.Jedis jedis = pool.getResource()) {
-            for (String currency : currencies) {
-                String key = "vaultx:leaderboard:" + currency;
-                List<redis.clients.jedis.resps.Tuple> range = jedis.zrevrangeWithScores(key, 0, maxPlayers - 1);
-                List<LeaderboardEntry> entries = new ArrayList<>();
-                for (redis.clients.jedis.resps.Tuple tuple : range) {
-                    try {
-                        UUID uuid = UUID.fromString(tuple.getElement());
-                        double balance = tuple.getScore();
-                        String name = net.milkbowl.vault.util.UUIDCache.getName(uuid);
-                        if (name == null) {
-                            name = uuid.toString();
-                        }
-                        entries.add(new LeaderboardEntry(name, balance));
-                    } catch (Exception ex) {
-                        // Ignore individual parse issues
-                    }
-                }
-                leaderboardCaches.put(currency, java.util.Collections.unmodifiableList(entries));
-            }
-            leaderboardCaches.keySet().retainAll(currencies);
-        } catch (Exception e) {
-            plugin.getLogger().warning("[VaultRedis] Failed to update leaderboards from Redis: " + e.getMessage());
+        if (leaderboardService != null) {
+            leaderboardService.stopLeaderboardUpdater();
         }
     }
 
     public List<LeaderboardEntry> getLeaderboard(String currency) {
-        return leaderboardCaches.getOrDefault(currency.toLowerCase(), java.util.Collections.emptyList());
+        if (leaderboardService != null) {
+            List<RedisLeaderboardService.LeaderboardEntry> entries = leaderboardService.getCachedLeaderboard(currency);
+            List<LeaderboardEntry> result = new ArrayList<>();
+            for (RedisLeaderboardService.LeaderboardEntry e : entries) {
+                result.add(new LeaderboardEntry(e.name, e.balance));
+            }
+            return result;
+        }
+        return java.util.Collections.emptyList();
     }
 
     public long getCustomCurrencyTimestamp(UUID uuid, String currency) {
@@ -865,7 +504,7 @@ public class VaultRedisManager {
                 String leaderboardKey = "vaultx:leaderboard:" + curr;
                 String totalMoneyKey = "vaultx:stats:total_money:" + curr;
                 String accountsCountKey = "vaultx:stats:accounts_count:" + curr;
-                pipeline.eval(UPDATE_BALANCE_STATS_LUA,
+                pipeline.eval(net.milkbowl.vault.redis.service.RedisScriptService.UPDATE_BALANCE_STATS_LUA,
                         java.util.Arrays.asList(leaderboardKey, totalMoneyKey, accountsCountKey),
                         java.util.Arrays.asList(uuidStr, String.valueOf(rec.balance)));
 

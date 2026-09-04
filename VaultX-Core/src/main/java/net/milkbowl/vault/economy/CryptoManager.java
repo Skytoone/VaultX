@@ -13,7 +13,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 
-public class CryptoManager {
+public class CryptoManager implements VaultCryptoAPI {
 
     private final Plugin plugin;
     private final Map<UUID, Map<String, Double>> cryptoWallets = new ConcurrentHashMap<>();
@@ -180,5 +180,20 @@ public class CryptoManager {
             }
         }
         cryptoWallets.clear();
+    }
+
+    @Override
+    public CompletableFuture<VaultCryptoAPI.CryptoWallet> getWalletAsync(OfflinePlayer player, String cryptoName) {
+        return getWalletAsync(player, cryptoName, null);
+    }
+
+    @Override
+    public CompletableFuture<EconomyResponse> mineTokensAsync(OfflinePlayer player, String cryptoName, double amount) {
+        return mineTokensAsync(player, cryptoName, amount, null);
+    }
+
+    @Override
+    public CompletableFuture<Boolean> transferCryptoAsync(String fromAddress, String toAddress, String cryptoName, double amount) {
+        return transferCryptoAsync(fromAddress, toAddress, cryptoName, amount, null);
     }
 }

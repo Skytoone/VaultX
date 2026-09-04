@@ -9,12 +9,13 @@ import org.bukkit.plugin.Plugin;
 
 import net.milkbowl.vault.economy.EconomyResponse;
 import net.milkbowl.vault.economy.OptimizedEconomy;
+import net.milkbowl.vault.economy.VaultLoanAPI;
 import net.milkbowl.vault.economy.VaultLoanAPI.LoanDetails;
 
 /**
  * Service encapsulating credit score computations and loan creation/repayment workflows.
  */
-public class LoanEconomyService {
+public class LoanEconomyService implements VaultLoanAPI {
 
     private final Plugin plugin;
     private final ExecutorService asyncExecutor;
@@ -40,7 +41,7 @@ public class LoanEconomyService {
             return CompletableFuture.completedFuture(new EconomyResponse(0, 0,
                     EconomyResponse.ResponseType.FAILURE, "Loans feature is disabled in config.yml"));
         }
-        return economy.depositCurrencyPlayerAsync(player, currency, amount);
+        return CompletableFuture.supplyAsync(() -> economy.depositCurrencyPlayer(player, currency, amount), asyncExecutor);
     }
 
     public CompletableFuture<EconomyResponse> repayLoanAsync(OfflinePlayer player, String loanId, double amount) {
@@ -48,7 +49,7 @@ public class LoanEconomyService {
             return CompletableFuture.completedFuture(new EconomyResponse(0, 0,
                     EconomyResponse.ResponseType.FAILURE, "Loans feature is disabled in config.yml"));
         }
-        return economy.withdrawPlayerAsync(player, amount);
+        return CompletableFuture.supplyAsync(() -> economy.withdrawPlayer(player, amount), asyncExecutor);
     }
 
     public CompletableFuture<List<LoanDetails>> getActiveLoansAsync(OfflinePlayer player) {

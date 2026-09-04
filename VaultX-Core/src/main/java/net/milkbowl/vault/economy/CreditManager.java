@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
-public class CreditManager {
+public class CreditManager implements VaultCreditAPI {
 
     private final Plugin plugin;
     private final Map<UUID, Map<String, VaultCreditAPI.CreditAccount>> creditAccounts = new ConcurrentHashMap<>();
@@ -127,5 +127,24 @@ public class CreditManager {
             }
         }
         creditAccounts.clear();
+    }
+
+    @Override
+    public CompletableFuture<VaultCreditAPI.CreditAccount> getCreditAccountAsync(OfflinePlayer player, String currency) {
+        return getCreditAccountAsync(player, currency, null);
+    }
+
+    @Override
+    public CompletableFuture<EconomyResponse> setOverdraftLimitAsync(OfflinePlayer player, String currency, double limit) {
+        return setOverdraftLimitAsync(player, currency, limit, null);
+    }
+
+    @Override
+    public CompletableFuture<Integer> updateCreditScoreAsync(OfflinePlayer player) {
+        return updateCreditScoreAsync(player, p -> {
+            var registry = net.milkbowl.vault.Vault.getServiceRegistry();
+            var econ = (registry != null && !registry.getWrappedEconomies().isEmpty()) ? registry.getWrappedEconomies().get(0) : null;
+            return econ != null ? econ.getBalance(p) : 0.0;
+        }, null);
     }
 }

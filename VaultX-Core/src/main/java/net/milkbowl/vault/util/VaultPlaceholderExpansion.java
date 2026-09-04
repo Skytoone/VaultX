@@ -17,6 +17,7 @@ public class VaultPlaceholderExpansion extends PlaceholderExpansion implements L
     private Economy cachedEconomy;
     private java.util.Set<String> cachedCurrencies;
     private long lastCurrenciesFetch;
+    private final java.util.Map<String, java.util.List<net.milkbowl.vault.redis.VaultRedisManager.LeaderboardEntry>> cachedLeaderboards = new java.util.concurrent.ConcurrentHashMap<>();
 
     public VaultPlaceholderExpansion(Plugin plugin) {
         this.plugin = plugin;
@@ -205,15 +206,17 @@ public class VaultPlaceholderExpansion extends PlaceholderExpansion implements L
         }
 
         net.milkbowl.vault.redis.VaultRedisManager redis = net.milkbowl.vault.redis.VaultRedisManager.getInstance();
-        if (redis == null) {
-            if (type.equals("name")) {
-                return "---";
-            } else {
-                return formatted ? econ.format(0.0) : "0.00";
+        java.util.List<net.milkbowl.vault.redis.VaultRedisManager.LeaderboardEntry> leaderboard = null;
+        if (redis != null && redis.isOnline()) {
+            leaderboard = redis.getLeaderboard(currency);
+            if (leaderboard != null && !leaderboard.isEmpty()) {
+                cachedLeaderboards.put(currency, leaderboard);
             }
         }
+        if (leaderboard == null || leaderboard.isEmpty()) {
+            leaderboard = cachedLeaderboards.get(currency);
+        }
 
-        java.util.List<net.milkbowl.vault.redis.VaultRedisManager.LeaderboardEntry> leaderboard = redis.getLeaderboard(currency);
         if (leaderboard == null || position < 1 || position > leaderboard.size()) {
             if (type.equals("name")) {
                 return "---";

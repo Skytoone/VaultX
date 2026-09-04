@@ -9,13 +9,14 @@ import java.util.concurrent.ExecutorService;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 
-import net.milkbowl.vault.economy.VaultTaxAPI.TaxRule;
+import net.milkbowl.vault.economy.VaultTaxAPI;
 import net.milkbowl.vault.economy.events.VaultInflationUpdateEvent;
 
 /**
- * Manages inflation rates, transaction taxes, progressive wealth taxes, and regional tax rules.
+ * Manages inflation rates, transaction taxes, progressive wealth taxes, and
+ * regional tax rules.
  */
-public class WealthTaxManager {
+public class WealthTaxManager implements VaultTaxAPI {
 
     private final Plugin plugin;
     private final Map<String, Double> inflationRates = new ConcurrentHashMap<>();
@@ -57,7 +58,12 @@ public class WealthTaxManager {
                 return false;
             taxRules.put(rule.taxId(), rule);
             return true;
-        }, executor);
+        }, executor != null ? executor : CompletableFuture::completedFuture);
+    }
+
+    @Override
+    public CompletableFuture<Boolean> registerTaxRuleAsync(TaxRule rule) {
+        return registerTaxRuleAsync(rule, null);
     }
 
     public CompletableFuture<Boolean> unregisterTaxRuleAsync(String taxId, ExecutorService executor) {
@@ -65,7 +71,12 @@ public class WealthTaxManager {
             if (taxId == null)
                 return false;
             return taxRules.remove(taxId) != null;
-        }, executor);
+        }, executor != null ? executor : CompletableFuture::completedFuture);
+    }
+
+    @Override
+    public CompletableFuture<Boolean> unregisterTaxRuleAsync(String taxId) {
+        return unregisterTaxRuleAsync(taxId, null);
     }
 
     public double calculateTax(String regionOrWorld, String currency, double amount) {

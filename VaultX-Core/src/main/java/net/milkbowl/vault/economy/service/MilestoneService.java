@@ -11,13 +11,14 @@ import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.plugin.Plugin;
 
+import net.milkbowl.vault.economy.VaultMilestoneAPI;
 import net.milkbowl.vault.economy.VaultMilestoneAPI.Milestone;
 import net.milkbowl.vault.economy.events.VaultMilestoneReachedEvent;
 
 /**
  * Service managing registered wealth milestones and player milestone progress tracking.
  */
-public class MilestoneService {
+public class MilestoneService implements VaultMilestoneAPI {
 
     private final Plugin plugin;
     private final ExecutorService asyncExecutor;
@@ -66,6 +67,15 @@ public class MilestoneService {
             }
             return reached;
         }, asyncExecutor);
+    }
+
+    @Override
+    public CompletableFuture<Boolean> hasReachedMilestoneAsync(OfflinePlayer player, String milestoneId) {
+        return hasReachedMilestoneAsync(player, milestoneId, p -> {
+            var registry = net.milkbowl.vault.Vault.getServiceRegistry();
+            var econ = (registry != null && !registry.getWrappedEconomies().isEmpty()) ? registry.getWrappedEconomies().get(0) : null;
+            return econ != null ? econ.getBalance(p) : 0.0;
+        });
     }
 
     public void clear() {

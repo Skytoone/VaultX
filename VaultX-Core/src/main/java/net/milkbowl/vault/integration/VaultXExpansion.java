@@ -65,7 +65,7 @@ public class VaultXExpansion extends PlaceholderExpansion {
             String currency = params.substring(8);
             if (currency.startsWith("formatted_")) {
                 String curr = currency.substring(10);
-                return econ.formatCurrency(curr, econ.getCurrencyBalance(player, curr));
+                return econ.getCurrencyService().formatCurrency(curr, econ.getCurrencyBalance(player, curr));
             }
             return String.format("%.2f", econ.getCurrencyBalance(player, currency));
         }
@@ -100,13 +100,13 @@ public class VaultXExpansion extends PlaceholderExpansion {
         // %vaultx_symbol_<currency>%
         if (params.startsWith("symbol_")) {
             String currency = params.substring(7);
-            return econ.getCurrencySymbol(currency);
+            return econ.getCurrencyService().getCurrencySymbol(currency);
         }
 
         // %vaultx_multiplier_<currency>%
         if (params.startsWith("multiplier_")) {
             String currency = params.substring(11);
-            return String.format("%.2f", econ.getGlobalMultiplier(currency));
+            return String.format("%.2f", econ.getBoosterService().getGlobalMultiplier(currency));
         }
 
         return null;

@@ -548,6 +548,18 @@ blackmarket:
   # Maximum amount of dirty money that can be laundered per transaction (Set to 0 for unlimited)
   max-per-transaction: 500000.0
 
+# Staking Configuration (/vx stake)
+staking:
+  base-rate: 0.05
+  period-factor: 30.0
+
+# Auction House Configuration (/vx auction)
+auctions:
+  enabled: true
+  check-interval-seconds: 30
+  default-duration-minutes: 60
+  max-duration-minutes: 1440
+
 settings:
   # Enable automatic update checking at startup
   check-updates: true

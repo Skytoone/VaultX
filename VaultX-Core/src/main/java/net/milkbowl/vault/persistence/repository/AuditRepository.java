@@ -28,25 +28,13 @@ public class AuditRepository {
     private final DatabaseConnectionManager dbManager;
     private final Plugin plugin;
     private final net.milkbowl.vault.analytics.FinancialAnalyticsService analyticsService;
-
-    private final BlockingQueue<PlayerTransactionRecord> transactionQueue;
-    private final BlockingQueue<AuditRecord> auditQueue;
-    private final BlockingQueue<PendingSyncRecord> syncQueue;
-    private Thread batchWriterThread;
-    private volatile boolean running = true;
-
-    private final AtomicLong totalBatchWriteTimeMs = new AtomicLong(0);
-    private final AtomicLong batchWriteCount = new AtomicLong(0);
+    private final net.milkbowl.vault.persistence.writer.AsyncBatchWriter batchWriter;
 
     public AuditRepository(DatabaseConnectionManager dbManager) {
         this.dbManager = dbManager;
         this.plugin = dbManager.getPlugin();
         this.analyticsService = new net.milkbowl.vault.analytics.FinancialAnalyticsService(dbManager);
-        int maxQueueCapacity = plugin.getConfig().getInt("advanced.batch-queue-limit", 50000);
-        this.transactionQueue = new LinkedBlockingQueue<>(maxQueueCapacity);
-        this.auditQueue = new LinkedBlockingQueue<>(maxQueueCapacity);
-        this.syncQueue = new LinkedBlockingQueue<>(maxQueueCapacity);
-        startBatchWriter();
+        this.batchWriter = new net.milkbowl.vault.persistence.writer.AsyncBatchWriter(dbManager, plugin);
     }
 
     public net.milkbowl.vault.analytics.FinancialAnalyticsService getAnalyticsService() {
@@ -54,12 +42,7 @@ public class AuditRepository {
     }
 
     public void queueBalanceSync(UUID uuid, String currency, double balance) {
-        syncQueue.offer(new PendingSyncRecord(
-                uuid.toString(),
-                currency == null ? "default" : currency,
-                balance,
-                System.currentTimeMillis()
-        ));
+        batchWriter.queueBalanceSync(uuid, currency, balance);
     }
 
     public void processQueue(VaultRedisManager redis, AccountRepository accountRepo) {
@@ -123,14 +106,7 @@ public class AuditRepository {
     }
 
     public void saveSecurityAudit(UUID uuid, String name, double amount, String action, String details) {
-        auditQueue.offer(new AuditRecord(
-                System.currentTimeMillis(),
-                uuid != null ? uuid.toString() : null,
-                name,
-                amount,
-                action,
-                details
-        ));
+        batchWriter.saveSecurityAudit(uuid, name, amount, action, details);
     }
 
     public List<AuditRecord> getSecurityAudits(UUID uuid, int page, int pageSize) {
@@ -184,7 +160,7 @@ public class AuditRepository {
 
     public void savePlayerTransaction(UUID uuid, String type, String currency, double amount, String otherParty) {
         String category = determineCategory(otherParty);
-        transactionQueue.offer(new PlayerTransactionRecord(
+        batchWriter.savePlayerTransaction(new PlayerTransactionRecord(
                 System.currentTimeMillis(),
                 uuid != null ? uuid.toString() : null,
                 type,
@@ -241,12 +217,6 @@ public class AuditRepository {
 
     public double getTransactionVolume24h(String currency) {
         return analyticsService.getTransactionVolume24h(currency);
-    }
-
-    public double getAverageBatchWriteLatencyMs() {
-        long count = batchWriteCount.get();
-        if (count == 0) return 0.0;
-        return (double) totalBatchWriteTimeMs.get() / count;
     }
 
     public List<AnalyticsReportEntry> getAnalyticsReport(int days) {
@@ -410,186 +380,13 @@ public class AuditRepository {
         }, new ArrayList<>(), "Failed to get expired pending local escrows");
     }
 
-    private void startBatchWriter() {
-        this.running = true;
-        this.batchWriterThread = new Thread(this::runBatchWriteLoop, "VaultX-BatchWriter");
-        this.batchWriterThread.setDaemon(true);
-        this.batchWriterThread.start();
-    }
-
-    private void runBatchWriteLoop() {
-        while (running || !transactionQueue.isEmpty() || !auditQueue.isEmpty() || !syncQueue.isEmpty()) {
-            try {
-                if (running) {
-                    Thread.sleep(1000);
-                }
-            } catch (InterruptedException e) {
-                running = false;
-            }
-            try {
-                flushBatchQueues();
-            } catch (Exception e) {
-                plugin.getLogger().severe("[Vault Failover] Error in batch writer loop: " + e.getMessage());
-            }
-            if (!running && transactionQueue.isEmpty() && auditQueue.isEmpty() && syncQueue.isEmpty()) {
-                break;
-            }
-        }
-    }
-
-    private void flushBatchQueues() {
-        if (!transactionQueue.isEmpty()) {
-            List<PlayerTransactionRecord> txList = new ArrayList<>();
-            transactionQueue.drainTo(txList);
-            if (!txList.isEmpty()) {
-                long start = System.currentTimeMillis();
-                String query = "INSERT INTO player_transactions (timestamp, uuid, type, currency, amount, other_party, category) VALUES (?, ?, ?, ?, ?, ?, ?)";
-                boolean success = dbManager.executeDatabaseOperationChecked(conn -> {
-                    boolean autoCommit = conn.getAutoCommit();
-                    conn.setAutoCommit(false);
-                    try (PreparedStatement pstmt = conn.prepareStatement(query)) {
-                        for (PlayerTransactionRecord record : txList) {
-                            pstmt.setLong(1, record.timestamp);
-                            pstmt.setString(2, record.uuid);
-                            pstmt.setString(3, record.type);
-                            pstmt.setString(4, record.currency);
-                            pstmt.setDouble(5, record.amount);
-                            pstmt.setString(6, record.otherParty);
-                            pstmt.setString(7, record.category);
-                            pstmt.addBatch();
-                        }
-                        pstmt.executeBatch();
-                        conn.commit();
-                    } catch (Exception e) {
-                        try { conn.rollback(); } catch (SQLException ignored) {}
-                        if (e instanceof SQLException) {
-                            throw (SQLException) e;
-                        } else {
-                            throw new SQLException(e);
-                        }
-                    } finally {
-                        conn.setAutoCommit(autoCommit);
-                    }
-                }, "Failed to batch insert player transactions");
-
-                if (success) {
-                    long duration = System.currentTimeMillis() - start;
-                    totalBatchWriteTimeMs.addAndGet(duration);
-                    batchWriteCount.incrementAndGet();
-                } else {
-                    plugin.getLogger().warning("[Vault Failover] Re-queueing " + txList.size() + " transactions due to database write failure.");
-                    for (PlayerTransactionRecord rec : txList) {
-                        if (!transactionQueue.offer(rec)) break;
-                    }
-                }
-            }
-        }
-
-        if (!auditQueue.isEmpty()) {
-            List<AuditRecord> auditList = new ArrayList<>();
-            auditQueue.drainTo(auditList);
-            if (!auditList.isEmpty()) {
-                long start = System.currentTimeMillis();
-                String query = "INSERT INTO security_audits (timestamp, uuid, name, amount, action, details) VALUES (?, ?, ?, ?, ?, ?)";
-                boolean success = dbManager.executeDatabaseOperationChecked(conn -> {
-                    boolean autoCommit = conn.getAutoCommit();
-                    conn.setAutoCommit(false);
-                    try (PreparedStatement pstmt = conn.prepareStatement(query)) {
-                        for (AuditRecord record : auditList) {
-                            pstmt.setLong(1, record.timestamp);
-                            pstmt.setString(2, record.uuid);
-                            pstmt.setString(3, record.name);
-                            pstmt.setDouble(4, record.amount);
-                            pstmt.setString(5, record.action);
-                            pstmt.setString(6, record.details);
-                            pstmt.addBatch();
-                        }
-                        pstmt.executeBatch();
-                        conn.commit();
-                    } catch (Exception e) {
-                        try { conn.rollback(); } catch (SQLException ignored) {}
-                        if (e instanceof SQLException) {
-                            throw (SQLException) e;
-                        } else {
-                            throw new SQLException(e);
-                        }
-                    } finally {
-                        conn.setAutoCommit(autoCommit);
-                    }
-                }, "Failed to batch insert security audits");
-
-                if (success) {
-                    long duration = System.currentTimeMillis() - start;
-                    totalBatchWriteTimeMs.addAndGet(duration);
-                    batchWriteCount.incrementAndGet();
-                } else {
-                    plugin.getLogger().warning("[Vault Failover] Re-queueing " + auditList.size() + " security audits due to database write failure.");
-                    for (AuditRecord rec : auditList) {
-                        if (!auditQueue.offer(rec)) break;
-                    }
-                }
-            }
-        }
-
-        if (!syncQueue.isEmpty()) {
-            List<PendingSyncRecord> syncList = new ArrayList<>();
-            syncQueue.drainTo(syncList);
-            if (!syncList.isEmpty()) {
-                long start = System.currentTimeMillis();
-                String query = "INSERT INTO pending_syncs (uuid, currency, balance, timestamp) VALUES (?, ?, ?, ?)";
-                boolean success = dbManager.executeDatabaseOperationChecked(conn -> {
-                    boolean autoCommit = conn.getAutoCommit();
-                    conn.setAutoCommit(false);
-                    try (PreparedStatement pstmt = conn.prepareStatement(query)) {
-                        for (PendingSyncRecord record : syncList) {
-                            pstmt.setString(1, record.uuid);
-                            pstmt.setString(2, record.currency);
-                            pstmt.setDouble(3, record.balance);
-                            pstmt.setLong(4, record.timestamp);
-                            pstmt.addBatch();
-                        }
-                        pstmt.executeBatch();
-                        conn.commit();
-                    } catch (Exception e) {
-                        try { conn.rollback(); } catch (SQLException ignored) {}
-                        if (e instanceof SQLException) {
-                            throw (SQLException) e;
-                        } else {
-                            throw new SQLException(e);
-                        }
-                    } finally {
-                        conn.setAutoCommit(autoCommit);
-                    }
-                }, "Failed to batch insert pending syncs");
-
-                if (success) {
-                    long duration = System.currentTimeMillis() - start;
-                    totalBatchWriteTimeMs.addAndGet(duration);
-                    batchWriteCount.incrementAndGet();
-                } else {
-                    plugin.getLogger().warning("[Vault Failover] Re-queueing " + syncList.size() + " pending syncs due to database write failure.");
-                    for (PendingSyncRecord rec : syncList) {
-                        if (!syncQueue.offer(rec)) break;
-                    }
-                }
-            }
-        }
+    public double getAverageBatchWriteLatencyMs() {
+        return batchWriter.getAverageBatchWriteLatencyMs();
     }
 
     public void close() {
-        running = false;
-        if (batchWriterThread != null) {
-            batchWriterThread.interrupt();
-            try {
-                batchWriterThread.join(5000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
-        try {
-            flushBatchQueues();
-        } catch (Exception e) {
-            plugin.getLogger().warning("[Vault Failover] Error flushing queues during shutdown: " + e.getMessage());
+        if (batchWriter != null) {
+            batchWriter.close();
         }
     }
 }

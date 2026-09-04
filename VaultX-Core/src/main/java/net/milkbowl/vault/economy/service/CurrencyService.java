@@ -10,7 +10,8 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.plugin.Plugin;
 
-import net.milkbowl.vault.economy.VaultCurrencyRegistry.CustomCurrencyProvider;
+import net.milkbowl.vault.economy.VaultCurrencyRegistry;
+import net.milkbowl.vault.economy.VaultFormatAPI;
 import net.milkbowl.vault.economy.Economy;
 import net.milkbowl.vault.economy.EconomyResponse;
 import net.milkbowl.vault.economy.MultiCurrencyEconomy;
@@ -18,7 +19,7 @@ import net.milkbowl.vault.economy.MultiCurrencyEconomy;
 /**
  * Manages currency registrations, multi-currency providers, currency symbols, and formatting.
  */
-public class CurrencyService {
+public class CurrencyService implements VaultCurrencyRegistry, VaultFormatAPI {
 
     private final Plugin plugin;
     private final Map<String, CustomCurrencyProvider> customProviders = new ConcurrentHashMap<>();
@@ -136,6 +137,7 @@ public class CurrencyService {
         return currencies;
     }
 
+    @Override
     public String getCurrencySymbol(String currency) {
         if (currency == null || currency.equalsIgnoreCase("default"))
             return "$";
@@ -152,6 +154,12 @@ public class CurrencyService {
         return currency.toUpperCase();
     }
 
+    @Override
+    public String formatCurrency(String currency, double amount) {
+        return formatCurrency(currency, amount, Locale.getDefault());
+    }
+
+    @Override
     public String formatCurrency(String currency, double amount, Locale locale) {
         String sym = getCurrencySymbol(currency);
         NumberFormat nf = NumberFormat.getNumberInstance(locale != null ? locale : Locale.getDefault());

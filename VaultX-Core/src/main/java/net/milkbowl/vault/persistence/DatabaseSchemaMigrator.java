@@ -53,6 +53,17 @@ public class DatabaseSchemaMigrator {
                         "last_updated " + bigintType + " NOT NULL DEFAULT 0, " +
                         "PRIMARY KEY (uuid, currency))");
 
+                stmt.execute("CREATE TABLE IF NOT EXISTS user_balances (" +
+                        "uuid VARCHAR(36) NOT NULL, " +
+                        "currency VARCHAR(32) NOT NULL, " +
+                        "balance DOUBLE NOT NULL, " +
+                        "last_updated " + bigintType + " NOT NULL DEFAULT 0, " +
+                        "PRIMARY KEY (uuid, currency))");
+
+                try {
+                    stmt.execute("CREATE VIEW IF NOT EXISTS user_balances AS SELECT uuid, currency, balance, last_updated FROM custom_currency_balances");
+                } catch (SQLException ignored) {}
+
                 stmt.execute("CREATE TABLE IF NOT EXISTS player_transactions (" +
                         "id " + autoIncrementKey + ", " +
                         "timestamp " + bigintType + " NOT NULL, " +

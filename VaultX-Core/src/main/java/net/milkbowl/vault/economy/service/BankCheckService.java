@@ -12,18 +12,19 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 
 import net.milkbowl.vault.economy.EconomyResponse;
-import net.milkbowl.vault.economy.VaultAsyncEconomy;
+import net.milkbowl.vault.economy.MultiCurrencyEconomy;
+import net.milkbowl.vault.economy.VaultCheckAPI;
 
 /**
  * Service encapsulating bank check creation, lore serialization, details parsing, and redemption.
  */
-public class BankCheckService {
+public class BankCheckService implements VaultCheckAPI {
 
     private final Plugin plugin;
     private final ExecutorService asyncExecutor;
-    private final VaultAsyncEconomy economy;
+    private final MultiCurrencyEconomy economy;
 
-    public BankCheckService(Plugin plugin, ExecutorService asyncExecutor, VaultAsyncEconomy economy) {
+    public BankCheckService(Plugin plugin, ExecutorService asyncExecutor, MultiCurrencyEconomy economy) {
         this.plugin = plugin;
         this.asyncExecutor = asyncExecutor;
         this.economy = economy;
@@ -87,6 +88,6 @@ public class BankCheckService {
             return CompletableFuture.completedFuture(
                     new EconomyResponse(0, 0, EconomyResponse.ResponseType.FAILURE, "Invalid bank check"));
         }
-        return economy.depositPlayerAsync(player, details.amount());
+        return CompletableFuture.supplyAsync(() -> economy.depositCurrencyPlayer(player, details.currency(), details.amount()), asyncExecutor);
     }
 }

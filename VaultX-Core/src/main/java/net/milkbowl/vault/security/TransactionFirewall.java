@@ -316,6 +316,13 @@ public class TransactionFirewall implements VaultFirewallAPI {
             
             synchronized (auditLogLock) {
                 try {
+                    if (auditLogFile.exists() && auditLogFile.length() > 10 * 1024 * 1024L) {
+                        File oldFile = new File(auditLogFile.getParentFile(), "security_audit.log.old");
+                        if (oldFile.exists()) {
+                            oldFile.delete();
+                        }
+                        auditLogFile.renameTo(oldFile);
+                    }
                     if (!auditLogFile.exists()) {
                         auditLogFile.createNewFile();
                     }

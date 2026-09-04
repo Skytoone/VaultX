@@ -25,8 +25,8 @@ public class VaultBankTransactionEvent extends Event {
         DELETE_BANK
     }
 
-    public VaultBankTransactionEvent(String bankName, OfflinePlayer player, double amount, BankTransactionType type, double newBankBalance) {
-        super(true); // Is Asynchronous
+    public VaultBankTransactionEvent(String bankName, OfflinePlayer player, double amount, BankTransactionType type, double newBankBalance, boolean async) {
+        super(async);
         this.bankName = bankName;
         this.player = player;
         this.playerName = player != null ? player.getName() : null;
@@ -35,14 +35,30 @@ public class VaultBankTransactionEvent extends Event {
         this.newBankBalance = newBankBalance;
     }
 
-    public VaultBankTransactionEvent(String bankName, String playerName, double amount, BankTransactionType type, double newBankBalance) {
-        super(true); // Is Asynchronous
+    public VaultBankTransactionEvent(String bankName, OfflinePlayer player, double amount, BankTransactionType type, double newBankBalance) {
+        this(bankName, player, amount, type, newBankBalance, isAsyncCurrentThread());
+    }
+
+    public VaultBankTransactionEvent(String bankName, String playerName, double amount, BankTransactionType type, double newBankBalance, boolean async) {
+        super(async);
         this.bankName = bankName;
         this.player = null;
         this.playerName = playerName;
         this.amount = amount;
         this.type = type;
         this.newBankBalance = newBankBalance;
+    }
+
+    public VaultBankTransactionEvent(String bankName, String playerName, double amount, BankTransactionType type, double newBankBalance) {
+        this(bankName, playerName, amount, type, newBankBalance, isAsyncCurrentThread());
+    }
+
+    private static boolean isAsyncCurrentThread() {
+        try {
+            return !org.bukkit.Bukkit.isPrimaryThread();
+        } catch (Throwable ignored) {
+            return true;
+        }
     }
 
     public String getBankName() {
